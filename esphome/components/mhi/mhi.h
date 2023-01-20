@@ -27,7 +27,6 @@ namespace esphome {
             protected:
                 void transmit_state() override;
                 /// Handle received IR Buffer
-                bool on_receive(remote_base::RemoteReceiveData data) override;
 
         };
     } // namespace mhi
