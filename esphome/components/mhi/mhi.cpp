@@ -288,12 +288,12 @@ namespace esphome {
                     swingV = MHI_VS_SWING;
                     break;
                 case climate::CLIMATE_FAN_FOCUS:
-                    fanSpeed = MHI_FAN_HIPOWER;
+                    fanSpeed = MHI_HIPOWER;
                     swingH = MHI_HS_RIGHTLEFT;
                     swingV = MHI_VS_SWING;
                     break;
                 case climate::CLIMATE_FAN_DIFFUSE:
-                    fanSpeed = MHI_FAN_HIPOWER;
+                    fanSpeed = MHI_HIPOWER;
                     swingH = MHI_HS_LEFTRIGHT;
                     swingV = MHI_VS_SWING;
                     break;
