@@ -45,13 +45,13 @@ namespace esphome {
         const uint8_t MHI_HS_RIGHTLEFT = 0x44;
         const uint8_t MHI_HS_3DAUTO = 0x04;
 
-        // Only available in Auto, Cool and Heat mode
-        const uint8_t MHI_3DAUTO_ON = 0x00;
-        const uint8_t MHI_3DAUTO_OFF = 0x12;
+        // // Only available in Auto, Cool and Heat mode
+        // const uint8_t MHI_3DAUTO_ON = 0x00;
+        // const uint8_t MHI_3DAUTO_OFF = 0x12;
 
-        // NOT available in Fan or Dry mode
-        const uint8_t MHI_SILENT_ON = 0x00;
-        const uint8_t MHI_SILENT_OFF = 0x80;
+        // // NOT available in Fan or Dry mode
+        // const uint8_t MHI_SILENT_ON = 0x00;
+        // const uint8_t MHI_SILENT_OFF = 0x80;
 
         // Pulse parameters in usec
         const uint16_t MHI_BIT_MARK = 400;
@@ -186,9 +186,6 @@ namespace esphome {
                             this->fan_mode = climate::CLIMATE_FAN_DIFFUSE;
                             break;
                     }
-                case MHI_HIPOWER: // Set via BOOST Preset
-                    this->preset = climate::CLIMATE_PRESET_BOOST; // Problem to get feedback to trigger preset.
-                    break;
                 default:
                     this->fan_mode = climate::CLIMATE_FAN_AUTO;
                     break;
@@ -218,10 +215,7 @@ namespace esphome {
             auto temperature = 22;
             auto fanSpeed = MHI_FAN_AUTO;
             auto swingV = MHI_VS_STOP;
-            // auto swingH = MHI_HS_RIGHT;  // custom preferred value for this mode, should be MHI_HS_STOP
             auto swingH = MHI_HS_STOP;
-            auto silentMode = MHI_SILENT_OFF;
-            auto _3DAuto = MHI_3DAUTO_OFF;
 
             // ----------------------
             // Assign the values
@@ -291,43 +285,21 @@ namespace esphome {
                 case climate::CLIMATE_FAN_MIDDLE:
                     fanSpeed = MHI_FAN_AUTO;
                     swingH = MHI_HS_MIDDLE;
+                    swingV = MHI_VS_SWING;
                     break;
                 case climate::CLIMATE_FAN_FOCUS:
-                    fanSpeed = MHI_FAN_AUTO;
+                    fanSpeed = MHI_FAN_HIPOWER;
                     swingH = MHI_HS_RIGHTLEFT;
+                    swingV = MHI_VS_SWING;
                     break;
                 case climate::CLIMATE_FAN_DIFFUSE:
-                    fanSpeed = MHI_FAN_AUTO;
+                    fanSpeed = MHI_FAN_HIPOWER;
                     swingH = MHI_HS_LEFTRIGHT;
+                    swingV = MHI_VS_SWING;
                     break;
                 case climate::CLIMATE_FAN_AUTO:
                 default:
                     fanSpeed = MHI_FAN_AUTO;
-                    break;
-            }
-
-            switch (this->preset.value()) {
-                case climate::CLIMATE_PRESET_NONE:
-                    _3DAuto = MHI_3DAUTO_OFF; // set 3Dmode to off
-                    // ecoMode = MHI_ECO_OFF; //set echo mode OFF
-                    // nightMode = MHI_NIGHT_OFF; //set night off
-                    break;
-                // case climate::CLIMATE_PRESET_ECO:
-                //     _3DAuto = MHI_3DAUTO_OFF; // set 3Dmode to off
-                //     ecoMode = MHI_ECO_ON;  // set device to Eco mode
-                //     nightMode = MHI_NIGHT_OFF; //set night off
-                //     fanSpeed = MHI_FAN2; //set fan speed
-                //     break;
-                case climate::CLIMATE_PRESET_BOOST:
-                    _3DAuto = MHI_3DAUTO_OFF; // set 3Dmode to off
-                    fanSpeed = MHI_HIPOWER; // set device to high fan
-                    // nightMode = MHI_NIGHT_OFF; //set night off
-                    break;
-                // case climate::CLIMATE_PRESET_ACTIVITY:
-                //     _3DAuto = MHI_3DAUTO_ON; // set 3dmode to on
-                //     nightMode = MHI_NIGHT_ON; // set nightmode on
-                //     break;
-                default: //set None to default - no action
                     break;
             }
 
