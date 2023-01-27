@@ -45,13 +45,13 @@ namespace esphome {
         const uint8_t MHI_HS_RIGHTLEFT = 0x44;
         const uint8_t MHI_HS_3DAUTO = 0x04;
 
-        // Only available in Auto, Cool and Heat mode
+        // // Only available in Auto, Cool and Heat mode
         // const uint8_t MHI_3DAUTO_ON = 0x00;
         // const uint8_t MHI_3DAUTO_OFF = 0x12;
 
-        // NOT available in Fan or Dry mode
-        const uint8_t MHI_SILENT_ON = 0x00;
-        const uint8_t MHI_SILENT_OFF = 0x80;
+        // // NOT available in Fan or Dry mode
+        // const uint8_t MHI_SILENT_ON = 0x00;
+        // const uint8_t MHI_SILENT_OFF = 0x80;
 
         // Pulse parameters in usec
         const uint16_t MHI_BIT_MARK = 400;
@@ -67,14 +67,14 @@ namespace esphome {
             // The protocol sends the data twice, read here
             // uint32_t loop_read;
             
-            uint8_t bytes[19] = {};
+            uint8_t bytes[11] = {};
 
             //for (uint16_t loop = 1; loop <= 2; loop++) {
             if (!data.expect_item(MHI_HEADER_MARK, MHI_HEADER_SPACE))
                 return false;
             
             // loop_read = 0;
-            for (uint8_t a_byte = 0; a_byte < 19; a_byte++) {
+            for (uint8_t a_byte = 0; a_byte < 11; a_byte++) {
                 uint8_t byte = 0;
                 for (int8_t a_bit = 0; a_bit < 8; a_bit++) {
                     if (data.expect_item(MHI_BIT_MARK, MHI_ONE_SPACE))
@@ -111,10 +111,10 @@ namespace esphome {
 
             auto powerMode = bytes[9] & 0x08;
             auto operationMode = bytes[9] & 0x07;
-            auto temperature = (~bytes[9] & 0x0F) + 17; 
-            auto fanSpeed = bytes[7] & 0x0F;
-            auto swingV = bytes[5] & 0xE0; // ignore the bit for the 3D auto
-            auto swingH = bytes[5] & 0x0F;
+            auto temperature = ((~bytes[9] & 0xF0) >> 4) + 17;
+            auto fanSpeed = bytes[7] & 0xE0;
+            auto swingV = ((bytes[5] & 0x02) | (bytes[7] & 0x18));
+            auto swingH = (bytes[5] & 0xCC);
 
             ESP_LOGD(TAG,
                 "Resulting numbers: powerMode=0x%02X operationMode=0x%02X temperature=%d fanSpeed=0x%02X swingV=0x%02X swingH=0x%02X",
@@ -171,7 +171,6 @@ namespace esphome {
                     this->fan_mode = climate::CLIMATE_FAN_MEDIUM;
                     break;
                 case MHI_FAN3:
-                case MHI_HIPOWER: // Not yet supported. Will be added when ESPHome supports it.
                     this->fan_mode = climate::CLIMATE_FAN_HIGH;
                     break;
                 case MHI_FAN_AUTO:
@@ -187,7 +186,6 @@ namespace esphome {
                             this->fan_mode = climate::CLIMATE_FAN_DIFFUSE;
                             break;
                     }
-                case MHI_ECONO: // Not yet supported. Will be added when ESPHome supports it.
                 default:
                     this->fan_mode = climate::CLIMATE_FAN_AUTO;
                     break;
@@ -217,9 +215,7 @@ namespace esphome {
             auto temperature = 22;
             auto fanSpeed = MHI_FAN_AUTO;
             auto swingV = MHI_VS_STOP;
-            // auto swingH = MHI_HS_RIGHT;  // custom preferred value for this mode, should be MHI_HS_STOP
             auto swingH = MHI_HS_STOP;
-            auto silentMode = MHI_SILENT_OFF;
 
             // ----------------------
             // Assign the values
@@ -289,14 +285,17 @@ namespace esphome {
                 case climate::CLIMATE_FAN_MIDDLE:
                     fanSpeed = MHI_FAN_AUTO;
                     swingH = MHI_HS_MIDDLE;
+                    swingV = MHI_VS_SWING;
                     break;
                 case climate::CLIMATE_FAN_FOCUS:
-                    fanSpeed = MHI_FAN_AUTO;
+                    fanSpeed = MHI_HIPOWER;
                     swingH = MHI_HS_RIGHTLEFT;
+                    swingV = MHI_VS_SWING;
                     break;
                 case climate::CLIMATE_FAN_DIFFUSE:
-                    fanSpeed = MHI_FAN_AUTO;
+                    fanSpeed = MHI_HIPOWER;
                     swingH = MHI_HS_LEFTRIGHT;
+                    swingV = MHI_VS_SWING;
                     break;
                 case climate::CLIMATE_FAN_AUTO:
                 default:
@@ -309,13 +308,13 @@ namespace esphome {
             // ----------------------
 
             // Power state + operating mode
-            remote_state[5] |= swingH | (swingV & 0b00000010) | cleanMode;
+            remote_state[5] |= swingH | (swingV & 0x02) | cleanMode;
 
             // Temperature
-            remote_state[7] |= fanSpeed | (swingV & 0b00011000);
+            remote_state[7] |= fanSpeed | (swingV & 0x18);
 
             // Fan speed
-            remote_state[9] |= operatingMode | powerMode | (~((uint8_t)temperature - 17) & 0x0F);
+            remote_state[9] |= operatingMode | powerMode | ((~(((uint8_t)temperature - 17) << 4)) & 0xF0);
 
             // There is no real checksum, but some bytes are inverted
             remote_state[6] = ~remote_state[5];
