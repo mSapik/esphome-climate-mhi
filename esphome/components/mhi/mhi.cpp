@@ -329,6 +329,7 @@ namespace esphome {
                 //     break;
                 default: //set None to default - no action
                     break;
+            }
 
             // ----------------------
             // Assign the bytes
