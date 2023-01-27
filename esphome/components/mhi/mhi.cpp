@@ -171,7 +171,6 @@ namespace esphome {
                     this->fan_mode = climate::CLIMATE_FAN_MEDIUM;
                     break;
                 case MHI_FAN3:
-                case MHI_HIPOWER: // Not yet supported. Will be added when ESPHome supports it.
                     this->fan_mode = climate::CLIMATE_FAN_HIGH;
                     break;
                 case MHI_FAN_AUTO:
