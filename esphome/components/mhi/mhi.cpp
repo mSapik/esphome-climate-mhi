@@ -310,7 +310,7 @@ namespace esphome {
                 case climate::CLIMATE_PRESET_NONE:
                     _3DAuto = MHI_3DAUTO_OFF; // set 3Dmode to off
                     // ecoMode = MHI_ECO_OFF; //set echo mode OFF
-                    nightMode = MHI_NIGHT_OFF; //set night off
+                    // nightMode = MHI_NIGHT_OFF; //set night off
                     break;
                 // case climate::CLIMATE_PRESET_ECO:
                 //     _3DAuto = MHI_3DAUTO_OFF; // set 3Dmode to off
