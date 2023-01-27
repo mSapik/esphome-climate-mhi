@@ -222,6 +222,7 @@ namespace esphome {
             // auto swingH = MHI_HS_RIGHT;  // custom preferred value for this mode, should be MHI_HS_STOP
             auto swingH = MHI_HS_STOP;
             auto silentMode = MHI_SILENT_OFF;
+            auto _3DAuto = MHI_3DAUTO_OFF;
 
             // ----------------------
             // Assign the values
