@@ -139,8 +139,8 @@ namespace esphome {
                         this->mode = climate::CLIMATE_MODE_DRY;
                         break;
                     default:
-                    case MHI_AUTO:
-                        this->mode = climate::CLIMATE_MODE_AUTO;
+                    case MHI_COOL:
+                        this->mode = climate::CLIMATE_MODE_COOL;
                         // swingV = MHI_VS_MIDDLE;
                         break;
                 }
@@ -208,7 +208,7 @@ namespace esphome {
             // Initial values
             // ----------------------
 
-            auto operatingMode = MHI_AUTO;
+            auto operatingMode = MHI_COOL;
             auto powerMode = MHI_ON;
             auto cleanMode = 0x20; // always off
 
