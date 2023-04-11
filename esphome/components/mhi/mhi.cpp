@@ -219,6 +219,10 @@ namespace esphome {
                     operatingMode = MHI_COOL;
                     swingV = MHI_VS_UP; // custom preferred value for this mode
                     break;
+                case climate::CLIMATE_MODE_HEAT_COOL:
+                    operatingMode = MHI_COOL;
+                    swingV = MHI_VS_MIDDLE; // custom preferred value for this mode
+                    break;
                 case climate::CLIMATE_MODE_AUTO:
                     operatingMode = MHI_COOL;
                     swingV = MHI_VS_MIDDLE; // custom preferred value for this mode
