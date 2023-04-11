@@ -124,10 +124,6 @@ namespace esphome {
             if (powerMode == MHI_ON) {
                 // Power and operating mode
                 switch (operationMode) {
-                    case MHI_COOL:
-                        this->mode = climate::CLIMATE_MODE_COOL;
-                        //swingV = MHI_VS_UP;
-                        break;
                     case MHI_HEAT:
                         this->mode = climate::CLIMATE_MODE_HEAT;
                         // swingV = MHI_VS_DOWN;
