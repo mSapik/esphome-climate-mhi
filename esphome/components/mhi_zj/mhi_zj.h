@@ -3,7 +3,7 @@
 #include "esphome/components/climate_ir/climate_ir.h"
 
 namespace esphome {
-    namespace mhi {
+    namespace mhi_zj {
         // Temperature
         const uint8_t MHI_TEMP_MIN = 18; // Celsius
         const uint8_t MHI_TEMP_MAX = 30; // Celsius
@@ -30,5 +30,5 @@ namespace esphome {
                 bool on_receive(remote_base::RemoteReceiveData data) override;
 
         };
-    } // namespace mhi
+    } // namespace mhi_zj
 } // namespace esphome

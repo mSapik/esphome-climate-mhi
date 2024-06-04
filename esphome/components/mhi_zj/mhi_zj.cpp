@@ -1,9 +1,9 @@
-#include "mhi.h"
+#include "mhi_zj.h"
 #include "esphome/core/log.h"
 
 namespace esphome {
-    namespace mhi {
-        static const char *TAG = "mhi.climate";
+    namespace mhi_zj {
+        static const char *TAG = "mhi_zj.climate";
 
         // Power
         const uint32_t MHI_OFF = 0x08;
@@ -46,12 +46,12 @@ namespace esphome {
         const uint8_t MHI_HS_3DAUTO = 0x04;
 
         // // Only available in Auto, Cool and Heat mode
-        // const uint8_t MHI_3DAUTO_ON = 0x00;
-        // const uint8_t MHI_3DAUTO_OFF = 0x12;
+        const uint8_t MHI_3DAUTO_ON = 0x00;
+        const uint8_t MHI_3DAUTO_OFF = 0x12;
 
         // // NOT available in Fan or Dry mode
-        // const uint8_t MHI_SILENT_ON = 0x00;
-        // const uint8_t MHI_SILENT_OFF = 0x80;
+        const uint8_t MHI_SILENT_ON = 0x00;
+        const uint8_t MHI_SILENT_OFF = 0x80;
 
         // Pulse parameters in usec
         const uint16_t MHI_BIT_MARK = 400;
