@@ -1,17 +1,15 @@
-// mhi_multi_ir.cpp
 #include "mhi_multi_ir.h"
 #include "esphome/core/log.h"
-#include <cstring>
 
 namespace esphome {
 namespace mhi_multi_ir {
 
 static const char *TAG = "mhi_multi_ir.climate";
 
-// Универсальный ридер пакета: заголовок + N байт + проверка static + инверсий
+// Универсальный ридер: header + payload + static + inversions
 static bool read_bytes(remote_base::RemoteReceiveData &data,
-                       const uint8_t *prefix, size_t prefix_len,
-                       uint8_t *out, size_t len) {
+                       const uint8_t prefix[], size_t prefix_len,
+                       uint8_t out[], size_t len) {
   if (!data.expect_item(MHI_HDR_MARK, MHI_HDR_SPACE))
     return false;
   for (size_t i = 0; i < len; i++) {
@@ -28,7 +26,7 @@ static bool read_bytes(remote_base::RemoteReceiveData &data,
   for (size_t i = 0; i < prefix_len; i++)
     if (out[i] != prefix[i])
       return false;
-  // inversions: for each byte in second half vs first half
+  // inversions
   size_t half = len / 2;
   for (size_t i = 0; i < half - prefix_len; i++)
     if (out[prefix_len + i] != uint8_t(~out[prefix_len + half + i]))
@@ -37,109 +35,161 @@ static bool read_bytes(remote_base::RemoteReceiveData &data,
 }
 
 bool MhiClimate::on_receive(remote_base::RemoteReceiveData data) {
-  ESP_LOGD(TAG, "on_receive for model %u", uint(model_));
+  ESP_LOGD(TAG, "on_receive for model %u", unsigned(model_));
 
-  // Выбираем длину и префикс по модели
+  // Составляем prefix из макросов
   uint8_t buf[19];
-  const uint8_t *prefix;
-  size_t prefix_len = 5, total_len;
+  size_t total_len = (model_ == ZM ? 19U : 11U);
+  const uint8_t prefix[5] = {
+    MHI_P0, MHI_P1, MHI_P2,
+    (model_ == ZM ? MHI_P3_ZM     : MHI_P3_ZJZEPM),
+    (model_ == ZM ? MHI_P4_ZM     : MHI_P4_ZJZEPM)
+  };
 
-  if (model_ == ZM) {
-    // ZM: 19 байт, prefix 52 AE C3 1A E5
-    static const uint8_t p_zm[5] = {0x52, 0xAE, 0xC3, 0x1A, 0xE5};
-    prefix = p_zm;
-    total_len = 19;
-  } else {
-    // ZJ, ZEA, ZMP: 11 байт, prefix 52 AE C3 26 D9
-    static const uint8_t p_other[5] = {0x52, 0xAE, 0xC3, 0x26, 0xD9};
-    prefix = p_other;
-    total_len = 11;
-  }
-
-  if (!read_bytes(data, prefix, prefix_len, buf, total_len))
+  if (!read_bytes(data, prefix, 5, buf, total_len))
     return false;
 
-  // Разбор общих полей
-  if (model_ == ZM) {
-    // ZM: buf[5]=flags, buf[7]=~temp, buf[9]=fan+mode, buf[11]=swingV, buf[13]=swingH
-    auto pwr = buf[5] & 0x08;
-    auto md  = buf[5] & 0x07;
-    auto tmp = ((~buf[7] & 0x0F)) + 17;
-    auto fan = buf[9] & 0x0F;
-    auto sv  = buf[11] & 0xE0;
-    auto sh  = buf[13] & 0x0F;
-    this->target_temperature = tmp;
-    this->mode = (pwr == MHI_ON
-        ? (md == MHI_HEAT   ? climate::CLIMATE_MODE_HEAT
-         : md == MHI_COOL   ? climate::CLIMATE_MODE_COOL
-         : md == MHI_DRY    ? climate::CLIMATE_MODE_DRY
-         : md == MHI_FAN    ? climate::CLIMATE_MODE_FAN_ONLY
-         :                     climate::CLIMATE_MODE_HEAT_COOL)
-        : climate::CLIMATE_MODE_OFF);
-    // swing
-    if (sv == MHI_VS_SWING && sh == MHI_HS_SWING)
-      this->swing_mode = climate::CLIMATE_SWING_BOTH;
-    else if (sv == MHI_VS_SWING)
-      this->swing_mode = climate::CLIMATE_SWING_VERTICAL;
-    else if (sh == MHI_HS_SWING)
-      this->swing_mode = climate::CLIMATE_SWING_HORIZONTAL;
-    else
-      this->swing_mode = climate::CLIMATE_SWING_OFF;
-    // fan
-    switch (fan) {
-      case 1:  this->fan_mode = climate::CLIMATE_FAN_LOW;    break;
-      case 2:  this->fan_mode = (fan_levels_ == FAN_LEVELS_3 ? climate::CLIMATE_FAN_MEDIUM
-                                                             : climate::CLIMATE_FAN_MIDDLE);
-               break;
-      case 3:  this->fan_mode = (fan_levels_ == FAN_LEVELS_3 ? climate::CLIMATE_FAN_HIGH
-                                                             : climate::CLIMATE_FAN_MEDIUM);
-               break;
-      case 4:  this->fan_mode = climate::CLIMATE_FAN_HIGH;   break;
-      default: this->fan_mode = climate::CLIMATE_FAN_AUTO;   break;
+  // Разбор по модели
+  switch (model_) {
+    case ZJ: {
+      auto pwr = buf[9] & 0x08;
+      auto md  = buf[9] & 0x07;
+      auto tmp = ((~buf[9] & 0xF0) >> 4) + 17;
+      auto fan = buf[7] & 0xE0;
+      auto sv  = (buf[5] & 0x02) | (buf[7] & 0x18);
+      auto sh  = buf[5] & 0xCC;
+
+      this->mode = (pwr == MHI_ON
+          ? (md == MHI_COOL ? climate::CLIMATE_MODE_COOL
+            : md == MHI_HEAT ? climate::CLIMATE_MODE_HEAT
+            : md == MHI_DRY  ? climate::CLIMATE_MODE_DRY
+            : md == MHI_FAN  ? climate::CLIMATE_MODE_FAN_ONLY
+                             : climate::CLIMATE_MODE_AUTO)
+          : climate::CLIMATE_MODE_OFF);
+      this->target_temperature = tmp;
+
+      if      (sv == MHI_VS_SWING && sh == MHI_HS_SWING) this->swing_mode = climate::CLIMATE_SWING_BOTH;
+      else if (sv == MHI_VS_SWING)                     this->swing_mode = climate::CLIMATE_SWING_VERTICAL;
+      else if (sh == MHI_HS_SWING)                     this->swing_mode = climate::CLIMATE_SWING_HORIZONTAL;
+      else                                            this->swing_mode = climate::CLIMATE_SWING_OFF;
+
+      switch (fan) {
+        case MHI_ZJ_FAN1: this->fan_mode = climate::CLIMATE_FAN_LOW;    break;
+        case MHI_ZJ_FAN2: this->fan_mode = climate::CLIMATE_FAN_MEDIUM; break;
+        case MHI_ZJ_FAN3: this->fan_mode = climate::CLIMATE_FAN_HIGH;   break;
+        default:
+          this->fan_mode = climate::CLIMATE_FAN_AUTO;
+          if      (sh == MHI_HS_MIDDLE)    this->fan_mode = climate::CLIMATE_FAN_MIDDLE;
+          else if (sh == MHI_HS_RIGHTLEFT) this->fan_mode = climate::CLIMATE_FAN_FOCUS;
+          else if (sh == MHI_HS_LEFTRIGHT) this->fan_mode = climate::CLIMATE_FAN_DIFFUSE;
+      }
+      break;
     }
-  } else {
-    // ZJ, ZEA, ZMP: buf[9]=mode+temp, buf[7]=fan+sv bits, buf[5]=hs+sv bits
-    auto pwr = buf[9] & 0x08;
-    auto md  = buf[9] & 0x07;
-    auto tmp = ((~buf[9] & 0xF0) >> 4) + 17;
-    auto fan = buf[7] & 0xE0;
-    auto sv  = (buf[5] & 0x02) | (buf[7] & 0x18);
-    auto sh  = buf[5] & 0xCC;
-    this->target_temperature = tmp;
-    this->mode = (pwr == MHI_ON
-        ? (md == MHI_HEAT   ? climate::CLIMATE_MODE_HEAT
-         : md == MHI_COOL   ? climate::CLIMATE_MODE_COOL
-         : md == MHI_DRY    ? climate::CLIMATE_MODE_DRY
-         : md == MHI_FAN    ? climate::CLIMATE_MODE_FAN_ONLY
-         :                     climate::CLIMATE_MODE_AUTO)
-        : climate::CLIMATE_MODE_OFF);
-    // swing
-    if (sv == MHI_VS_SWING && sh == MHI_HS_SWING)
-      this->swing_mode = climate::CLIMATE_SWING_BOTH;
-    else if (sv == MHI_VS_SWING)
-      this->swing_mode = climate::CLIMATE_SWING_VERTICAL;
-    else if (sh == MHI_HS_SWING)
-      this->swing_mode = climate::CLIMATE_SWING_HORIZONTAL;
-    else
-      this->swing_mode = climate::CLIMATE_SWING_OFF;
-    // fan
-    switch (fan) {
-      case MHI_ZJ_FAN1: case MHI_ZEA_FAN1: case MHI_ZMP_FAN1:
-        this->fan_mode = climate::CLIMATE_FAN_LOW;    break;
-      case MHI_ZJ_FAN2: case MHI_ZEA_FAN2: case MHI_ZMP_FAN2:
-        this->fan_mode = climate::CLIMATE_FAN_MEDIUM; break;
-      case MHI_ZJ_FAN3: case MHI_ZEA_FAN3: case MHI_ZMP_FAN3:
-        this->fan_mode = climate::CLIMATE_FAN_HIGH;   break;
-      default:
-        this->fan_mode = climate::CLIMATE_FAN_AUTO;
-        if (sh == MHI_HS_MIDDLE)    this->fan_mode = climate::CLIMATE_FAN_MIDDLE;
-        if (sh == MHI_HS_RIGHTLEFT) this->fan_mode = climate::CLIMATE_FAN_FOCUS;
-        if (sh == MHI_HS_LEFTRIGHT) this->fan_mode = climate::CLIMATE_FAN_DIFFUSE;
+
+    case ZEA: {
+      auto pwr = buf[9] & 0x08;
+      auto md  = buf[9] & 0x07;
+      auto tmp = ((~buf[9] & 0xF0) >> 4) + 17;
+      auto fan = buf[7] & 0xE0;
+      auto sv  = (buf[5] & 0x02) | (buf[7] & 0x18);
+      auto sh  = buf[5] & 0xCC;
+
+      this->mode = (pwr == MHI_ON
+          ? (md == MHI_COOL ? climate::CLIMATE_MODE_COOL
+            : md == MHI_HEAT ? climate::CLIMATE_MODE_HEAT
+            : md == MHI_DRY  ? climate::CLIMATE_MODE_DRY
+            : md == MHI_FAN  ? climate::CLIMATE_MODE_FAN_ONLY
+                             : climate::CLIMATE_MODE_AUTO)
+          : climate::CLIMATE_MODE_OFF);
+      this->target_temperature = tmp;
+
+      if      (sv == MHI_VS_SWING && sh == MHI_HS_SWING) this->swing_mode = climate::CLIMATE_SWING_BOTH;
+      else if (sv == MHI_VS_SWING)                     this->swing_mode = climate::CLIMATE_SWING_VERTICAL;
+      else if (sh == MHI_HS_SWING)                     this->swing_mode = climate::CLIMATE_SWING_HORIZONTAL;
+      else                                            this->swing_mode = climate::CLIMATE_SWING_OFF;
+
+      switch (fan) {
+        case MHI_ZEA_FAN1: this->fan_mode = climate::CLIMATE_FAN_LOW;    break;
+        case MHI_ZEA_FAN2: this->fan_mode = climate::CLIMATE_FAN_MEDIUM; break;
+        case MHI_ZEA_FAN3: this->fan_mode = climate::CLIMATE_FAN_HIGH;   break;
+        case MHI_ZEA_FAN4: this->fan_mode = climate::CLIMATE_FAN_MIDDLE; break;
+        default:            this->fan_mode = climate::CLIMATE_FAN_AUTO;   break;
+      }
+      break;
     }
-  }
+
+    case ZMP: {
+      auto pwr = buf[9] & 0x08;
+      auto md  = buf[9] & 0x07;
+      auto tmp = ((~buf[9] & 0xF0) >> 4) + 17;
+      auto fan = buf[7] & 0xE0;
+      auto sv  = (buf[5] & 0x02) | (buf[7] & 0x18);
+
+      this->mode = (pwr == MHI_ON
+          ? (md == MHI_COOL ? climate::CLIMATE_MODE_COOL
+            : md == MHI_HEAT ? climate::CLIMATE_MODE_HEAT
+            : md == MHI_DRY  ? climate::CLIMATE_MODE_DRY
+            : md == MHI_FAN  ? climate::CLIMATE_MODE_FAN_ONLY
+                             : climate::CLIMATE_MODE_AUTO)
+          : climate::CLIMATE_MODE_OFF);
+      this->target_temperature = tmp;
+
+      this->swing_mode = (sv == MHI_VS_SWING
+                          ? climate::CLIMATE_SWING_VERTICAL
+                          : climate::CLIMATE_SWING_OFF);
+
+      switch (fan) {
+        case MHI_ZMP_FAN1: this->fan_mode = climate::CLIMATE_FAN_LOW;    break;
+        case MHI_ZMP_FAN2: this->fan_mode = climate::CLIMATE_FAN_MEDIUM; break;
+        case MHI_ZMP_FAN3: this->fan_mode = climate::CLIMATE_FAN_HIGH;   break;
+        default:            this->fan_mode = climate::CLIMATE_FAN_AUTO;   break;
+      }
+      break;
+    }
+
+    case ZM: {
+      auto pwr = buf[5] & 0x08;
+      auto md  = buf[5] & 0x07;
+      auto tmp = ((~buf[7] & 0x0F)) + 17;
+      auto fan = buf[9] & 0x0F;
+      auto sv  = buf[11] & 0xE0;
+      auto sh  = buf[13] & 0x0F;
+
+      this->mode = (pwr == MHI_ON
+          ? (md == MHI_COOL ? climate::CLIMATE_MODE_COOL
+            : md == MHI_HEAT ? climate::CLIMATE_MODE_HEAT
+            : md == MHI_DRY  ? climate::CLIMATE_MODE_DRY
+            : md == MHI_FAN  ? climate::CLIMATE_MODE_FAN_ONLY
+                             : climate::CLIMATE_MODE_HEAT_COOL)
+          : climate::CLIMATE_MODE_OFF);
+      this->target_temperature = tmp;
+
+      if      (sv == MHI_VS_SWING && sh == MHI_HS_SWING) this->swing_mode = climate::CLIMATE_SWING_BOTH;
+      else if (sv == MHI_VS_SWING)                     this->swing_mode = climate::CLIMATE_SWING_VERTICAL;
+      else if (sh == MHI_HS_SWING)                     this->swing_mode = climate::CLIMATE_SWING_HORIZONTAL;
+      else                                            this->swing_mode = climate::CLIMATE_SWING_OFF;
+
+      switch (fan) {
+        case 1:  this->fan_mode = climate::CLIMATE_FAN_LOW;    break;
+        case 2:  this->fan_mode = (fan_levels_ == FAN_LEVELS_3
+                                    ? climate::CLIMATE_FAN_MEDIUM
+                                    : climate::CLIMATE_FAN_MIDDLE);
+                 break;
+        case 3:  this->fan_mode = (fan_levels_ == FAN_LEVELS_3
+                                    ? climate::CLIMATE_FAN_HIGH
+                                    : climate::CLIMATE_FAN_MEDIUM);
+                 break;
+        case 4:  this->fan_mode = climate::CLIMATE_FAN_HIGH;   break;
+        default: this->fan_mode = climate::CLIMATE_FAN_AUTO;   break;
+      }
+      break;
+    }
+  }  // switch(model_)
 
   ESP_LOGD(TAG, "on_receive done: mode=%u temp=%.1f fan=%u swing=%u",
-           this->mode, this->target_temperature, this->fan_mode.value(), this->swing_mode);
+           this->mode, this->target_temperature,
+           this->fan_mode.value(), this->swing_mode);
+
   this->publish_state();
   return true;
 }
