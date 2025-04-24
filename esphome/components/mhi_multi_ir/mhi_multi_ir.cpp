@@ -6,7 +6,7 @@ namespace mhi_multi_ir {
 
 static const char *TAG = "mhi_multi_ir.climate";
 
-// Универсальный ридер: header + payload + static + inversions
+// Общий ридер: header + payload + статик + инверсии
 static bool read_bytes(remote_base::RemoteReceiveData &data,
                        const uint8_t prefix[], size_t prefix_len,
                        uint8_t out[], size_t len) {
@@ -22,11 +22,11 @@ static bool read_bytes(remote_base::RemoteReceiveData &data,
     }
     out[i] = v;
   }
-  // static prefix
+  // Проверяем статические байты-префикс
   for (size_t i = 0; i < prefix_len; i++)
     if (out[i] != prefix[i])
       return false;
-  // inversions
+  // Проверяем инверсии: вторую половину полудлины
   size_t half = len / 2;
   for (size_t i = 0; i < half - prefix_len; i++)
     if (out[prefix_len + i] != uint8_t(~out[prefix_len + half + i]))
@@ -37,19 +37,22 @@ static bool read_bytes(remote_base::RemoteReceiveData &data,
 bool MhiClimate::on_receive(remote_base::RemoteReceiveData data) {
   ESP_LOGD(TAG, "on_receive for model %u", unsigned(model_));
 
-  // Составляем prefix из макросов
+  // Определяем длину буфера
+  const size_t total_len = (model_ == ZM ? 19 : 11);
   uint8_t buf[19];
-  size_t total_len = (model_ == ZM ? 19U : 11U);
-  const uint8_t prefix[5] = {
-    MHI_P0, MHI_P1, MHI_P2,
-    (model_ == ZM ? MHI_P3_ZM     : MHI_P3_ZJZEPM),
-    (model_ == ZM ? MHI_P4_ZM     : MHI_P4_ZJZEPM)
-  };
+
+  // Заполняем префикс поэлементно, чтобы избежать narrowing
+  uint8_t prefix[5];
+  prefix[0] = MHI_P0;
+  prefix[1] = MHI_P1;
+  prefix[2] = MHI_P2;
+  prefix[3] = (model_ == ZM ? MHI_P3_ZM : MHI_P3_ZJZEPM);
+  prefix[4] = (model_ == ZM ? MHI_P4_ZM : MHI_P4_ZJZEPM);
 
   if (!read_bytes(data, prefix, 5, buf, total_len))
     return false;
 
-  // Разбор по модели
+  // Разбор полей в зависимости от model_
   switch (model_) {
     case ZJ: {
       auto pwr = buf[9] & 0x08;
@@ -171,25 +174,24 @@ bool MhiClimate::on_receive(remote_base::RemoteReceiveData data) {
 
       switch (fan) {
         case 1:  this->fan_mode = climate::CLIMATE_FAN_LOW;    break;
-        case 2:  this->fan_mode = (fan_levels_ == FAN_LEVELS_3
-                                    ? climate::CLIMATE_FAN_MEDIUM
-                                    : climate::CLIMATE_FAN_MIDDLE);
+        case 2:  this->fan_mode = (fan_levels_==FAN_LEVELS_3
+                                   ? climate::CLIMATE_FAN_MEDIUM
+                                   : climate::CLIMATE_FAN_MIDDLE);
                  break;
-        case 3:  this->fan_mode = (fan_levels_ == FAN_LEVELS_3
-                                    ? climate::CLIMATE_FAN_HIGH
-                                    : climate::CLIMATE_FAN_MEDIUM);
+        case 3:  this->fan_mode = (fan_levels_==FAN_LEVELS_3
+                                   ? climate::CLIMATE_FAN_HIGH
+                                   : climate::CLIMATE_FAN_MEDIUM);
                  break;
         case 4:  this->fan_mode = climate::CLIMATE_FAN_HIGH;   break;
         default: this->fan_mode = climate::CLIMATE_FAN_AUTO;   break;
       }
       break;
     }
-  }  // switch(model_)
+  }  // switch model_
 
   ESP_LOGD(TAG, "on_receive done: mode=%u temp=%.1f fan=%u swing=%u",
            this->mode, this->target_temperature,
            this->fan_mode.value(), this->swing_mode);
-
   this->publish_state();
   return true;
 }
