@@ -1,4 +1,3 @@
-# climate.py
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import climate_ir
@@ -31,8 +30,6 @@ CONFIG_SCHEMA = climate_ir.CLIMATE_IR_WITH_RECEIVER_SCHEMA.extend({
 
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
-    # модель
     cg.add(var.set_model(MODELS[config["model"]]))
-    # сколько скоростей
     cg.add(var.set_fan_levels(FAN_LEVELS[config["set_fan_levels"]]))
     await climate_ir.register_climate_ir(var, config)

@@ -1,4 +1,3 @@
-// mhi_multi_ir.h
 #pragma once
 
 #include "esphome/components/climate_ir/climate_ir.h"
@@ -44,29 +43,6 @@ enum Model : uint8_t {
 #define MHI_COOL          0x06
 #define MHI_DRY           0x05
 #define MHI_FAN           0x04
-#define MHI_ZMP_MODE_FAN   0xD4
-#define MHI_ZMP_MODE_MAINT 0x06
-
-// Вертикальный swing
-#define MHI_VS_SWING      0x0A
-#define MHI_VS_UP         0x02
-#define MHI_VS_MUP        0x18
-#define MHI_VS_MIDDLE     0x10
-#define MHI_VS_MDOWN      0x08
-#define MHI_VS_DOWN       0x00
-#define MHI_VS_STOP       0x1A
-
-// Горизонтальный swing
-#define MHI_HS_SWING      0x4C
-#define MHI_HS_MIDDLE     0x48
-#define MHI_HS_LEFT       0xC8
-#define MHI_HS_MLEFT      0x88
-#define MHI_HS_MRIGHT     0x08
-#define MHI_HS_RIGHT      0xC4
-#define MHI_HS_STOP       0xCC
-#define MHI_HS_LEFTRIGHT  0x84
-#define MHI_HS_RIGHTLEFT  0x44
-#define MHI_HS_3DAUTO     0x04
 
 // 3D auto / silent
 #define MHI_3DAUTO_ON     0x00
@@ -76,13 +52,11 @@ enum Model : uint8_t {
 
 // Eco / Clean
 #define MHI_ECO_ON        0x00
-#define MHI_ECO_OFF       0x10
 #define MHI_CLEAN_ON      0x00
 #define MHI_ZJ_CLEAN_OFF   0x20
 #define MHI_ZEA_CLEAN_OFF  0x08
 #define MHI_ZM_CLEAN_OFF   0x60
 #define MHI_ZMP_CLEAN_OFF  0x20
-#define MHI_ZMP_CLEAN_ON   0xDF
 
 // Скорости вентилятора — ZJ
 #define MHI_ZJ_FAN_AUTO   0xE0
@@ -90,7 +64,6 @@ enum Model : uint8_t {
 #define MHI_ZJ_FAN2       0x80
 #define MHI_ZJ_FAN3       0x60
 #define MHI_ZJ_HIPOWER    0x40
-#define MHI_ZJ_ECONO      0x00
 
 // Скорости вентилятора — ZEA
 #define MHI_ZEA_FAN_AUTO  0xE0
@@ -99,7 +72,6 @@ enum Model : uint8_t {
 #define MHI_ZEA_FAN3      0x86
 #define MHI_ZEA_FAN4      0x68
 #define MHI_ZEA_HIPOWER   0x2C
-#define MHI_ZEA_ECONO     0x0E
 
 // Скорости вентилятора — ZM
 #define MHI_ZM_FAN_AUTO   0x0F
@@ -108,7 +80,6 @@ enum Model : uint8_t {
 #define MHI_ZM_FAN3       0x0C
 #define MHI_ZM_FAN4       0x0B
 #define MHI_ZM_HIPOWER    0x07
-#define MHI_ZM_ECONO      0x09
 
 // Скорости вентилятора — ZMP
 #define MHI_ZMP_FAN_AUTO  0xE0
@@ -116,7 +87,16 @@ enum Model : uint8_t {
 #define MHI_ZMP_FAN2      0x80
 #define MHI_ZMP_FAN3      0x60
 #define MHI_ZMP_HIPOWER   0x20
-#define MHI_ZMP_ECONO     0x00
+
+// Вертикальный swing
+#define MHI_VS_SWING      0x0A
+#define MHI_VS_STOP       0x1A
+
+// Горизонтальный swing
+#define MHI_HS_SWING      0x4C
+#define MHI_HS_MIDDLE     0x48
+#define MHI_HS_LEFTRIGHT  0x84
+#define MHI_HS_RIGHTLEFT  0x44
 
 /** Количество уровней вентилятора, поддерживаемое блоком */
 enum SetFanLevels : uint8_t {
@@ -150,16 +130,12 @@ class MhiClimate : public climate_ir::ClimateIR {
         model_(ZJ),
         fan_levels_(FAN_LEVELS_3) {}
 
-  /** Установить модель блока */
   void set_model(Model m) { model_ = m; }
-
-  /** Установить, сколько скоростей вентилятора */
   void set_fan_levels(SetFanLevels levels) { fan_levels_ = levels; }
 
  protected:
   climate::ClimateTraits traits() override {
     auto traits = climate_ir::ClimateIR::traits();
-    // Формируем set на основе количества скоростей
     std::set<climate::ClimateFanMode> modes;
     modes.insert(climate::CLIMATE_FAN_AUTO);
     modes.insert(climate::CLIMATE_FAN_LOW);
@@ -167,7 +143,6 @@ class MhiClimate : public climate_ir::ClimateIR {
       modes.insert(climate::CLIMATE_FAN_MIDDLE);
     modes.insert(climate::CLIMATE_FAN_MEDIUM);
     modes.insert(climate::CLIMATE_FAN_HIGH);
-    // Всегда доступны FOCUS и DIFFUSE
     modes.insert(climate::CLIMATE_FAN_FOCUS);
     modes.insert(climate::CLIMATE_FAN_DIFFUSE);
     traits.set_supported_fan_modes(std::move(modes));
