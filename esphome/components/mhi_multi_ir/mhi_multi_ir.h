@@ -2,6 +2,7 @@
 #pragma once
 
 #include "esphome/components/climate_ir/climate_ir.h"
+#include "esphome/components/remote_base/remote_base.h"
 #include <cinttypes>
 #include <set>
 
@@ -180,8 +181,8 @@ class MhiClimate : public climate_ir::ClimateIR {
   Model model_;
   SetFanLevels fan_levels_;
 
-  static void send_bytes(remote_base::RemoteTransmitData *data,
-                         const uint8_t *tpl, size_t len);
+  template <typename TransmitCall>
+  static void send_bytes(TransmitCall &tx, const uint8_t buf[], size_t len);
 };
 
 }  // namespace mhi_multi_ir
