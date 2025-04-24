@@ -225,7 +225,7 @@ void MhiClimate::transmit_state() {
           buf[9] = (buf[9] & ~0x0F) | MHI_ZM_HIPOWER;
           break;
         case climate::CLIMATE_PRESET_ACTIVITY:
-          buf[11] |= MHI_ZM_3DAUTO_ON;
+          buf[11] |= MHI_3DAUTO_ON;
           buf[11] |= MHI_VS_SWING;
           break;
         default:
