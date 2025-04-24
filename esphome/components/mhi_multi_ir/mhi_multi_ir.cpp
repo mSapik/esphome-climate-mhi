@@ -21,8 +21,12 @@ bool MhiClimate::on_receive(remote_base::RemoteReceiveData data) {
   ESP_LOGD(TAG, "on_receive start");
   if (!data.expect_item(MHI_HDR_MARK, MHI_HDR_SPACE)) return false;
 
+  // Определяем длину пакета в зависимости от модели
+  const int packet_len = (model_ == ZM) ? 19 : 11;
   uint8_t bytes[19] = {};
-  for (int i = 0; i < 19; i++) {
+
+  // Чтение байтов с проверкой длины
+  for (int i = 0; i < packet_len; i++) {
     uint8_t v = 0;
     for (int b = 0; b < 8; b++) {
       if (data.expect_item(MHI_BIT_MARK, MHI_ONE_SPACE))
@@ -33,22 +37,55 @@ bool MhiClimate::on_receive(remote_base::RemoteReceiveData data) {
     bytes[i] = v;
   }
 
-  if (bytes[0] != MHI_P0 || bytes[1] != MHI_P1 || bytes[2] != MHI_P2 ||
-      (bytes[3] != MHI_P3_ZJZEPM && bytes[3] != MHI_P3_ZM) ||
-      (bytes[4] != MHI_P4_ZJZEPM && bytes[4] != MHI_P4_ZM))
-    return false;
-  if (bytes[5] != uint8_t(~bytes[6]) ||
-      bytes[7] != uint8_t(~bytes[8]) ||
-      bytes[9] != uint8_t(~bytes[10]))
-    return false;
+  // Проверка префиксов для конкретной модели
+  bool prefix_valid = false;
+  switch (model_) {
+    case ZJ:
+    case ZEA:
+    case ZMP:
+      prefix_valid = (bytes[3] == MHI_P3_ZJZEPM && bytes[4] == MHI_P4_ZJZEPM);
+      break;
+    case ZM:
+      prefix_valid = (bytes[3] == MHI_P3_ZM && bytes[4] == MHI_P4_ZM);
+      break;
+  }
+  if (!prefix_valid) return false;
 
+  // Проверка контрольных сумм
+  if (bytes[5] != uint8_t(~bytes[6]) || 
+      bytes[7] != uint8_t(~bytes[8]) || 
+      bytes[9] != uint8_t(~bytes[10])) {
+    return false;
+  }
+
+  // Извлечение общих полей
   uint8_t pwr = bytes[9] & 0x08;
   uint8_t md  = bytes[9] & 0x07;
   uint8_t tmp = ((~bytes[9] & 0xF0) >> 4) + 17;
-  uint8_t fan = bytes[7] & 0xE0;
-  uint8_t sv  = (bytes[5] & 0x02) | (bytes[7] & 0x18);
-  uint8_t sh  = bytes[5] & 0xCC;
 
+  // Инициализация специфичных для модели полей
+  uint8_t fan = 0;
+  uint8_t sv = 0;
+  uint8_t sh = 0;
+
+  switch (model_) {
+    case ZJ:
+    case ZEA:
+    case ZMP: {
+      fan = bytes[7] & 0xE0;
+      sv  = (bytes[5] & 0x02) | (bytes[7] & 0x18);
+      sh  = bytes[5] & 0xCC;
+      break;
+    }
+    case ZM: {
+      fan = bytes[9] & 0x0F; // Скорость вентилятора в младших 4 битах
+      sv  = bytes[11] & 0xE0; // Вертикальный swing
+      sh  = bytes[13] & 0x0F; // Горизонтальный swing
+      break;
+    }
+  }
+
+  // Обработка режима питания
   if (pwr == MHI_ON) {
     switch (md) {
       case MHI_HEAT: this->mode = climate::CLIMATE_MODE_HEAT; break;
@@ -62,19 +99,68 @@ bool MhiClimate::on_receive(remote_base::RemoteReceiveData data) {
   }
   this->target_temperature = tmp;
 
-  if (sv == MHI_VS_SWING && sh == MHI_HS_SWING)
-    this->swing_mode = climate::CLIMATE_SWING_BOTH;
-  else if (sv == MHI_VS_SWING)
-    this->swing_mode = climate::CLIMATE_SWING_VERTICAL;
-  else if (sh == MHI_HS_SWING)
-    this->swing_mode = climate::CLIMATE_SWING_HORIZONTAL;
-  else
-    this->swing_mode = climate::CLIMATE_SWING_OFF;
+  // Определение swing-режимов
+  switch (model_) {
+    case ZJ:
+    case ZEA:
+    case ZMP: {
+      if (sv == MHI_VS_SWING && sh == MHI_HS_SWING)
+        this->swing_mode = climate::CLIMATE_SWING_BOTH;
+      else if (sv == MHI_VS_SWING)
+        this->swing_mode = climate::CLIMATE_SWING_VERTICAL;
+      else if (sh == MHI_HS_SWING)
+        this->swing_mode = climate::CLIMATE_SWING_HORIZONTAL;
+      else
+        this->swing_mode = climate::CLIMATE_SWING_OFF;
+      break;
+    }
+    case ZM: {
+      // Специфичная обработка для ZM
+      const uint8_t vs_mask = 0xE0;
+      const uint8_t hs_mask = 0x0F;
+      
+      if ((sv & vs_mask) == MHI_VS_SWING && (sh & hs_mask) == MHI_HS_SWING)
+        this->swing_mode = climate::CLIMATE_SWING_BOTH;
+      else if ((sv & vs_mask) == MHI_VS_SWING)
+        this->swing_mode = climate::CLIMATE_SWING_VERTICAL;
+      else if ((sh & hs_mask) == MHI_HS_SWING)
+        this->swing_mode = climate::CLIMATE_SWING_HORIZONTAL;
+      else
+        this->swing_mode = climate::CLIMATE_SWING_OFF;
+      break;
+    }
+  }
 
-  if      (fan == MHI_ZJ_FAN1  || fan == MHI_ZEA_FAN1  || fan == MHI_ZM_FAN1  || fan == MHI_ZMP_FAN1) this->fan_mode = climate::CLIMATE_FAN_LOW;
-  else if (fan == MHI_ZJ_FAN2  || fan == MHI_ZEA_FAN2  || fan == MHI_ZM_FAN2  || fan == MHI_ZMP_FAN2) this->fan_mode = climate::CLIMATE_FAN_MEDIUM;
-  else if (fan == MHI_ZJ_FAN3  || fan == MHI_ZEA_FAN3  || fan == MHI_ZM_FAN3  || fan == MHI_ZMP_FAN3) this->fan_mode = climate::CLIMATE_FAN_HIGH;
-  else                                                                                          this->fan_mode = climate::CLIMATE_FAN_AUTO;
+  // Определение скорости вентилятора
+  switch (model_) {
+    case ZJ:
+      if      (fan == MHI_ZJ_FAN1)  this->fan_mode = climate::CLIMATE_FAN_LOW;
+      else if (fan == MHI_ZJ_FAN2)  this->fan_mode = climate::CLIMATE_FAN_MEDIUM;
+      else if (fan == MHI_ZJ_FAN3)  this->fan_mode = climate::CLIMATE_FAN_HIGH;
+      else                          this->fan_mode = climate::CLIMATE_FAN_AUTO;
+      break;
+    
+    case ZEA:
+      if      (fan == MHI_ZEA_FAN1) this->fan_mode = climate::CLIMATE_FAN_LOW;
+      else if (fan == MHI_ZEA_FAN2) this->fan_mode = climate::CLIMATE_FAN_MEDIUM;
+      else if (fan == MHI_ZEA_FAN3) this->fan_mode = climate::CLIMATE_FAN_HIGH;
+      else                          this->fan_mode = climate::CLIMATE_FAN_AUTO;
+      break;
+    
+    case ZM:
+      if      (fan == MHI_ZM_FAN1)  this->fan_mode = climate::CLIMATE_FAN_LOW;
+      else if (fan == MHI_ZM_FAN2)  this->fan_mode = climate::CLIMATE_FAN_MEDIUM;
+      else if (fan == MHI_ZM_FAN3)  this->fan_mode = climate::CLIMATE_FAN_HIGH;
+      else                          this->fan_mode = climate::CLIMATE_FAN_AUTO;
+      break;
+    
+    case ZMP:
+      if      (fan == MHI_ZMP_FAN1) this->fan_mode = climate::CLIMATE_FAN_LOW;
+      else if (fan == MHI_ZMP_FAN2) this->fan_mode = climate::CLIMATE_FAN_MEDIUM;
+      else if (fan == MHI_ZMP_FAN3) this->fan_mode = climate::CLIMATE_FAN_HIGH;
+      else                          this->fan_mode = climate::CLIMATE_FAN_AUTO;
+      break;
+  }
 
   this->publish_state();
   return true;
