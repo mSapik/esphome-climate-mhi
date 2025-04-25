@@ -22,8 +22,8 @@ static const uint32_t CARRIER_HZ  = 38000;
 // ======== Сигнатуры ========
 
 static const uint8_t SIG_152_LEN = 5;
-static const uint8_t SIG_152[5]  = { 0xAD, 0x51, 0x3C, 0xE5, 0x1A };  // ZM/ZMP
-static const uint8_t SIG_88[5]   = { 0xAD, 0x51, 0x3C, 0xD9, 0x26 };  // ZJ/ZEA
+static const uint8_t SIG_152[5]  = {0xAD, 0x51, 0x3C, 0xE5, 0x1A};  // ZM/ZMP
+static const uint8_t SIG_88[5]   = {0xAD, 0x51, 0x3C, 0xD9, 0x26};  // ZJ/ZEA
 
 // ======== Температура ========
 
@@ -33,6 +33,15 @@ static const uint8_t MAX_TEMP = 31;
 // ======== Протокол 152-bit ========
 
 static const uint16_t LEN_152 = 19;
+
+// Swing auto для 152
+static const uint8_t SV152_AUTO = 0;
+// Swing auto для 152 горизонтали
+static const uint8_t SH152_AUTO = 0;
+
+// Swing off для 152
+static const uint8_t SV152_OFF  = 6;
+static const uint8_t SH152_OFF  = 8;
 
 union Protocol152 {
   uint8_t raw[LEN_152];
@@ -70,6 +79,14 @@ union Protocol152 {
 
 static const uint16_t LEN_88 = 11;
 
+// Swing auto для 88
+static const uint8_t SV88_AUTO = 0;
+// 3D для 88
+static const uint8_t SH88_3D   = 14;  // 0b1110
+// Swing off для 88
+static const uint8_t SV88_OFF  = 0;
+static const uint8_t SH88_OFF  = 0;
+
 union Protocol88 {
   uint8_t raw[LEN_88];
   struct {
@@ -91,7 +108,7 @@ union Protocol88 {
   };
 };
 
-// ======== Коды протоколов ========
+// ======== Коды режимов ========
 
 // 152-bit modes
 static const uint8_t P152_AUTO = 0;
@@ -107,6 +124,8 @@ static const uint8_t P88_DRY  = 2;
 static const uint8_t P88_FAN  = 3;
 static const uint8_t P88_HEAT = 4;
 
+// ======== Коды вентилятора ========
+
 // 152-bit fan speeds
 static const uint8_t F152_AUTO  = 0;
 static const uint8_t F152_LOW   = 1;
@@ -118,11 +137,6 @@ static const uint8_t F88_AUTO  = 0;
 static const uint8_t F88_LOW   = 2;
 static const uint8_t F88_MED   = 3;
 static const uint8_t F88_HIGH  = 4;
-
-// Swing values
-static const uint8_t SV152_OFF = 6;
-static const uint8_t SH152_OFF = 8;
-static const uint8_t SH88_3D   = 14;  // 0b1110
 
 // ======== Помощники ========
 
@@ -168,8 +182,8 @@ inline climate::ClimateFanMode convert_fan88(uint8_t f) {
 }
 
 inline climate::ClimateSwingMode convert_swing(uint8_t sv, uint8_t sh) {
-  const bool vs = (sv != SV152_OFF && sv != 0);
-  const bool hs = (sh != SH152_OFF && sh != 0);
+  const bool vs = (sv != SV152_OFF && sv != SV88_OFF);
+  const bool hs = (sh != SH152_OFF && sh != SH88_OFF);
   if (vs && hs) return climate::CLIMATE_SWING_BOTH;
   if (vs)       return climate::CLIMATE_SWING_VERTICAL;
   if (hs)       return climate::CLIMATE_SWING_HORIZONTAL;

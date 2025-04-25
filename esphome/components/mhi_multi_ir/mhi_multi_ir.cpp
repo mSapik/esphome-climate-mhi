@@ -68,7 +68,7 @@ bool MhiClimate::on_receive(remote_base::RemoteReceiveData data) {
     uint8_t sv = msg.SwingV5 | (msg.SwingV7 << 1);
     uint8_t sh = msg.SwingH1 | (msg.SwingH2 << 2);
     this->swing_mode         = convert_swing(sv, sh);
-    if (msg.Clean)  this->preset = climate::CLIMATE_PRESET_ECO;
+    if (msg.Clean)   this->preset = climate::CLIMATE_PRESET_ECO;
     if (sh == SH88_3D) this->preset = climate::CLIMATE_PRESET_ACTIVITY;
   }
 
@@ -79,7 +79,7 @@ bool MhiClimate::on_receive(remote_base::RemoteReceiveData data) {
 void MhiClimate::transmit_state() {
   ESP_LOGD(TAG, "transmit_state model=%u", model_);
 
-  // Если выключаем — шлём «чистый» OFF-пакет
+  // ===== OFF-пакет =====
   if (mode == climate::CLIMATE_MODE_OFF) {
     if (model_ == ZM || model_ == ZMP) {
       Protocol152 off; std::memset(&off, 0, sizeof(off));
@@ -100,14 +100,15 @@ void MhiClimate::transmit_state() {
     return;
   }
 
+  // ===== ON/Настройки пакет =====
   if (model_ == ZM || model_ == ZMP) {
     Protocol152 msg; std::memset(&msg, 0, sizeof(msg));
     std::memcpy(msg.Sig, SIG_152, SIG_152_LEN);
-    msg.Power = (mode != climate::CLIMATE_MODE_OFF);
+    msg.Power = 1;
     // Mode
-    if      (mode == climate::CLIMATE_MODE_COOL) msg.Mode = P152_COOL;
-    else if (mode == climate::CLIMATE_MODE_HEAT) msg.Mode = P152_HEAT;
-    else if (mode == climate::CLIMATE_MODE_DRY)  msg.Mode = P152_DRY;
+    if      (mode == climate::CLIMATE_MODE_COOL)    msg.Mode = P152_COOL;
+    else if (mode == climate::CLIMATE_MODE_HEAT)    msg.Mode = P152_HEAT;
+    else if (mode == climate::CLIMATE_MODE_DRY)     msg.Mode = P152_DRY;
     else if (mode == climate::CLIMATE_MODE_FAN_ONLY) msg.Mode = P152_FAN;
     else msg.Mode = P152_AUTO;
     msg.Temp = static_cast<uint8_t>(target_temperature - MIN_TEMP);
@@ -121,37 +122,34 @@ void MhiClimate::transmit_state() {
     else if (swing_mode == climate::CLIMATE_SWING_VERTICAL)   msg.SwingV = SV152_AUTO;
     else if (swing_mode == climate::CLIMATE_SWING_HORIZONTAL) msg.SwingH = SH152_AUTO;
     // Presets
-    msg.Clean = (preset == climate::CLIMATE_PRESET_ECO);
-    msg.Three = (preset == climate::CLIMATE_PRESET_ACTIVITY);
-    msg.D     = msg.Three;
-    // Inversion pairs
+    msg.Clean  = (preset == climate::CLIMATE_PRESET_ECO);
+    msg.Three  = (preset == climate::CLIMATE_PRESET_ACTIVITY);
+    msg.D      = msg.Three;
+    // Инверсия
     invert_byte_pairs(msg.raw + SIG_152_LEN, LEN_152 - SIG_152_LEN);
 
     auto tx = this->transmitter_->transmit();
     send_bytes(tx, msg.raw, LEN_152);
     send_bytes(tx, msg.raw, LEN_152);
-
   } else {
     Protocol88 msg; std::memset(&msg, 0, sizeof(msg));
     std::memcpy(msg.Sig, SIG_88, SIG_152_LEN);
-    msg.Power = (mode != climate::CLIMATE_MODE_OFF);
-    if      (mode == climate::CLIMATE_MODE_COOL)       msg.Mode = P88_COOL;
-    else if (mode == climate::CLIMATE_MODE_HEAT)       msg.Mode = P88_HEAT;
-    else if (mode == climate::CLIMATE_MODE_DRY)        msg.Mode = P88_DRY;
-    else if (mode == climate::CLIMATE_MODE_FAN_ONLY)   msg.Mode = P88_FAN;
+    msg.Power = 1;
+    if      (mode == climate::CLIMATE_MODE_COOL)    msg.Mode = P88_COOL;
+    else if (mode == climate::CLIMATE_MODE_HEAT)    msg.Mode = P88_HEAT;
+    else if (mode == climate::CLIMATE_MODE_DRY)     msg.Mode = P88_DRY;
+    else if (mode == climate::CLIMATE_MODE_FAN_ONLY) msg.Mode = P88_FAN;
     else msg.Mode = P88_AUTO;
     msg.Temp = static_cast<uint8_t>(target_temperature - MIN_TEMP);
     if      (fan_mode == climate::CLIMATE_FAN_LOW)    msg.Fan = F88_LOW;
     else if (fan_mode == climate::CLIMATE_FAN_MEDIUM) msg.Fan = F88_MED;
     else if (fan_mode == climate::CLIMATE_FAN_HIGH)   msg.Fan = F88_HIGH;
     else msg.Fan = F88_AUTO;
-    // 3D as horizontal swing
     if (preset == climate::CLIMATE_PRESET_ACTIVITY) {
       msg.SwingH1 = SH88_3D & 0x3;
       msg.SwingH2 = (SH88_3D >> 2) & 0x3;
     }
     msg.Clean = (preset == climate::CLIMATE_PRESET_ECO);
-
     invert_byte_pairs(msg.raw + SIG_152_LEN, LEN_88 - SIG_152_LEN);
 
     auto tx = this->transmitter_->transmit();
