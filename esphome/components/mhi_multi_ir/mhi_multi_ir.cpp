@@ -107,14 +107,14 @@ bool MhiClimate::on_receive(remote_base::RemoteReceiveData data) {
     else if (fan_spd == MHI_ZJ_FAN3) this->fan_mode = climate::CLIMATE_FAN_HIGH;
     else if (fan_spd == MHI_ZJ_FAN_AUTO) {
       switch (swing_h) {
-        case MHI_HS_MIDDLE: this->fan_mode = climate::CLIMATE_FAN_MIDDLE; break;
-        case MHI_HS_RIGHTLEFT: this->fan_mode = climate::CLIMATE_FAN_FOCUS; break;
-        case MHI_HS_LEFTRIGHT: this->fan_mode = climate::CLIMATE_FAN_DIFFUSE; break;
-        default: this->fan_mode = climate::CLIMATE_FAN_AUTO; break;
+        case MHI_HS_MIDDLE:     this->fan_mode = climate::CLIMATE_FAN_MIDDLE;  break;
+        case MHI_HS_RIGHTLEFT:  this->fan_mode = climate::CLIMATE_FAN_FOCUS;   break;
+        case MHI_HS_LEFTRIGHT:  this->fan_mode = climate::CLIMATE_FAN_DIFFUSE; break;
+        default:                this->fan_mode = climate::CLIMATE_FAN_AUTO;    break;
       }
     } else this->fan_mode = climate::CLIMATE_FAN_AUTO;
   } else if (model_ == ZM) {
-    if (fan_spd == MHI_ZM_FAN1) this->fan_mode = climate::CLIMATE_FAN_LOW;
+    if (fan_spd == MHI_ZM_FAN1)      this->fan_mode = climate::CLIMATE_FAN_LOW;
     else if (fan_spd == MHI_ZM_FAN3) this->fan_mode = climate::CLIMATE_FAN_MEDIUM;
     else if (fan_spd == MHI_ZM_FAN4) this->fan_mode = climate::CLIMATE_FAN_HIGH;
     else if (fan_spd == MHI_ZM_HIPOWER) this->preset = climate::CLIMATE_PRESET_BOOST;
@@ -128,14 +128,14 @@ bool MhiClimate::on_receive(remote_base::RemoteReceiveData data) {
 void MhiClimate::transmit_state() {
   ESP_LOGD(TAG, "transmit_state model=%u", unsigned(this->model_));
 
+  // Общие части
   uint8_t power_mode = (mode == climate::CLIMATE_MODE_OFF) ? MHI_OFF : MHI_ON;
   uint8_t operation_mode = MHI_AUTO;
-
   switch (mode) {
     case climate::CLIMATE_MODE_COOL:     operation_mode = MHI_COOL; break;
     case climate::CLIMATE_MODE_HEAT:     operation_mode = MHI_HEAT; break;
-    case climate::CLIMATE_MODE_DRY:      operation_mode = MHI_DRY; break;
-    case climate::CLIMATE_MODE_FAN_ONLY: operation_mode = MHI_FAN; break;
+    case climate::CLIMATE_MODE_DRY:      operation_mode = MHI_DRY;  break;
+    case climate::CLIMATE_MODE_FAN_ONLY: operation_mode = MHI_FAN;  break;
     case climate::CLIMATE_MODE_HEAT_COOL: operation_mode = MHI_AUTO; break;
     default: break;
   }
@@ -143,23 +143,23 @@ void MhiClimate::transmit_state() {
   uint8_t temp = static_cast<uint8_t>(clamp<int>(roundf(this->target_temperature), 17, 30) - 17);
   uint8_t swing_v = MHI_VS_STOP, swing_h = MHI_HS_STOP;
   if (swing_mode == climate::CLIMATE_SWING_BOTH) {
-    swing_v = MHI_VS_SWING;
-    swing_h = MHI_HS_SWING;
+    swing_v = MHI_VS_SWING; swing_h = MHI_HS_SWING;
   } else if (swing_mode == climate::CLIMATE_SWING_VERTICAL) {
     swing_v = MHI_VS_SWING;
   } else if (swing_mode == climate::CLIMATE_SWING_HORIZONTAL) {
     swing_h = MHI_HS_SWING;
   }
 
-  uint8_t fan_speed = 0x00;
-  uint8_t eco_mode = MHI_ECO_OFF;
-  uint8_t clean_mode = (model_ == ZM ? MHI_ZM_CLEAN_OFF : MHI_ZJ_CLEAN_OFF);
+  uint8_t eco_mode    = MHI_ECO_OFF;
+  uint8_t clean_mode  = (model_ == ZM ? MHI_ZM_CLEAN_OFF : MHI_ZJ_CLEAN_OFF);
   uint8_t preset_mode = this->preset.value_or(climate::CLIMATE_PRESET_NONE);
-  uint8_t _3d_auto = MHI_3DAUTO_OFF;
+  uint8_t _3d_auto    = MHI_3DAUTO_OFF;
   uint8_t silent_mode = MHI_SILENT_OFF;
+  uint8_t fan_speed   = 0;
 
+  // ПРЕДСЕТЫ
   if (preset_mode == climate::CLIMATE_PRESET_ECO) {
-    eco_mode = MHI_ECO_ON;
+    eco_mode  = MHI_ECO_ON;
     fan_speed = (model_ == ZM ? MHI_ZM_FAN2 : MHI_ZJ_FAN2);
   } else if (preset_mode == climate::CLIMATE_PRESET_BOOST) {
     fan_speed = (model_ == ZM ? MHI_ZM_HIPOWER : MHI_ZJ_HIPOWER);
@@ -168,26 +168,21 @@ void MhiClimate::transmit_state() {
   }
 
   if (model_ == ZM) {
+    // Для ZM: 19 байт + дублирование
+    const uint8_t p5 = static_cast<uint8_t>(0x90  | power_mode | operation_mode | clean_mode);
+    const uint8_t p7 = static_cast<uint8_t>(~temp & 0x0F);
+    const uint8_t p9 = static_cast<uint8_t>(fan_speed | eco_mode);
+    const uint8_t p11 = static_cast<uint8_t>(swing_v | _3d_auto);
+    const uint8_t p13 = static_cast<uint8_t>(swing_v | swing_h);
+
     uint8_t buf[19] = {
       MHI_P0, MHI_P1, MHI_P2, MHI_P3_ZM, MHI_P4_ZM,
-      0x90 | power_mode | operation_mode | clean_mode,
-      0x00,
-      static_cast<uint8_t>(~temp & 0x0F),
-      0x00,
-      fan_speed | eco_mode,
-      0x00,
-      swing_v | _3d_auto,
-      0x00,
-      swing_v | swing_h,
-      0x00,
-      silent_mode,
-      0x00,
-      0x7F,
-      0x00
+      p5, 0x00, p7, 0x00, p9,
+      0x00, p11, 0x00, p13, 0x00,
+      silent_mode, 0x00, 0x7F, 0x00
     };
-
-    buf[6] = ~buf[5];
-    buf[8] = ~buf[7];
+    buf[6]  = ~buf[5];
+    buf[8]  = ~buf[7];
     buf[10] = ~buf[9];
     buf[12] = ~buf[11];
     buf[14] = ~buf[13];
@@ -204,16 +199,15 @@ void MhiClimate::transmit_state() {
       }
     }
   } else {
+    // Для ZJ/ZEA/ZMP: 11 байт
+    const uint8_t p5 = static_cast<uint8_t>(swing_h | (swing_v & 0x02) | clean_mode);
+    const uint8_t p7 = static_cast<uint8_t>(fan_speed | (swing_v & 0x18));
+    const uint8_t p9 = static_cast<uint8_t>(operation_mode | power_mode | ((~(temp << 4)) & 0xF0));
+
     uint8_t buf[11] = {
       MHI_P0, MHI_P1, MHI_P2, MHI_P3_ZJZEPM, MHI_P4_ZJZEPM,
-      static_cast<uint8_t>(swing_h | (swing_v & 0x02) | clean_mode),
-      0x00,
-      static_cast<uint8_t>(fan_speed | (swing_v & 0x18)),
-      0x00,
-      static_cast<uint8_t>(operation_mode | power_mode | ((~(temp << 4)) & 0xF0)),
-      0x00
+      p5, 0x00, p7, 0x00, p9, 0x00
     };
-
     buf[6] = ~buf[5];
     buf[8] = ~buf[7];
     buf[10] = ~buf[9];
