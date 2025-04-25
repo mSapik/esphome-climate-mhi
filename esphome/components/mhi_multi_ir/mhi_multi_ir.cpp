@@ -6,7 +6,7 @@ namespace mhi_multi_ir {
 
 static const char *TAG = "mhi_multi_ir.climate";
 
-// Универсальная отправка битов
+// Общая функция отправки
 template<typename Tx>
 static void send_bytes(Tx &tx, const uint8_t *buf, size_t len) {
   auto *d = tx.get_data();
@@ -35,9 +35,8 @@ bool MhiClimate::on_receive(remote_base::RemoteReceiveData data) {
         else if (!data.expect_item(BIT_MARK, ZERO_SPACE)) return false;
       }
       msg.raw[i] = v;
-      if (i >= SIG_152_LEN && ((i - SIG_152_LEN) % 2 == 1)) {
+      if (i >= SIG_152_LEN && ((i - SIG_152_LEN) % 2 == 1))
         if (msg.raw[i] != static_cast<uint8_t>(~msg.raw[i-1])) return false;
-      }
     }
     if (std::memcmp(msg.Sig, SIG_152, SIG_152_LEN) != 0) return false;
 
@@ -45,8 +44,8 @@ bool MhiClimate::on_receive(remote_base::RemoteReceiveData data) {
     this->target_temperature = msg.Temp + MIN_TEMP;
     this->fan_mode           = convert_fan152(msg.Fan);
     this->swing_mode         = convert_swing(msg.SwingV, msg.SwingH);
-    if (msg.Clean) this->preset = climate::CLIMATE_PRESET_ECO;
-    if (msg.Three) this->preset = climate::CLIMATE_PRESET_ACTIVITY;
+    if (msg.Clean)  this->preset = climate::CLIMATE_PRESET_ECO;
+    if (msg.Three)  this->preset = climate::CLIMATE_PRESET_ACTIVITY;
 
   } else {
     Protocol88 msg; size_t len = LEN_88;
@@ -58,9 +57,8 @@ bool MhiClimate::on_receive(remote_base::RemoteReceiveData data) {
         else if (!data.expect_item(BIT_MARK, ZERO_SPACE)) return false;
       }
       msg.raw[i] = v;
-      if (i >= SIG_152_LEN && ((i - SIG_152_LEN) % 2 == 1)) {
+      if (i >= SIG_152_LEN && ((i - SIG_152_LEN) % 2 == 1))
         if (msg.raw[i] != static_cast<uint8_t>(~msg.raw[i-1])) return false;
-      }
     }
     if (std::memcmp(msg.Sig, SIG_88, SIG_152_LEN) != 0) return false;
 
@@ -70,8 +68,8 @@ bool MhiClimate::on_receive(remote_base::RemoteReceiveData data) {
     uint8_t sv = msg.SwingV5 | (msg.SwingV7 << 1);
     uint8_t sh = msg.SwingH1 | (msg.SwingH2 << 2);
     this->swing_mode         = convert_swing(sv, sh);
-    if (msg.Clean) this->preset = climate::CLIMATE_PRESET_ECO;
-    if (sh == (SH88_3D)) this->preset = climate::CLIMATE_PRESET_ACTIVITY;
+    if (msg.Clean)  this->preset = climate::CLIMATE_PRESET_ECO;
+    if (sh == SH88_3D) this->preset = climate::CLIMATE_PRESET_ACTIVITY;
   }
 
   this->publish_state();
@@ -80,6 +78,27 @@ bool MhiClimate::on_receive(remote_base::RemoteReceiveData data) {
 
 void MhiClimate::transmit_state() {
   ESP_LOGD(TAG, "transmit_state model=%u", model_);
+
+  // Если выключаем — шлём «чистый» OFF-пакет
+  if (mode == climate::CLIMATE_MODE_OFF) {
+    if (model_ == ZM || model_ == ZMP) {
+      Protocol152 off; std::memset(&off, 0, sizeof(off));
+      std::memcpy(off.Sig, SIG_152, SIG_152_LEN);
+      off.Power = 0;
+      invert_byte_pairs(off.raw + SIG_152_LEN, LEN_152 - SIG_152_LEN);
+      auto tx = this->transmitter_->transmit();
+      send_bytes(tx, off.raw, LEN_152);
+      send_bytes(tx, off.raw, LEN_152);
+    } else {
+      Protocol88 off; std::memset(&off, 0, sizeof(off));
+      std::memcpy(off.Sig, SIG_88, SIG_152_LEN);
+      off.Power = 0;
+      invert_byte_pairs(off.raw + SIG_152_LEN, LEN_88 - SIG_152_LEN);
+      auto tx = this->transmitter_->transmit();
+      send_bytes(tx, off.raw, LEN_88);
+    }
+    return;
+  }
 
   if (model_ == ZM || model_ == ZMP) {
     Protocol152 msg; std::memset(&msg, 0, sizeof(msg));
