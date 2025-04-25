@@ -34,12 +34,8 @@ static const uint8_t MAX_TEMP = 31;
 
 static const uint16_t LEN_152 = 19;
 
-// Swing auto для 152
 static const uint8_t SV152_AUTO = 0;
-// Swing auto для 152 горизонтали
 static const uint8_t SH152_AUTO = 0;
-
-// Swing off для 152
 static const uint8_t SV152_OFF  = 6;
 static const uint8_t SH152_OFF  = 8;
 
@@ -79,11 +75,8 @@ union Protocol152 {
 
 static const uint16_t LEN_88 = 11;
 
-// Swing auto для 88
 static const uint8_t SV88_AUTO = 0;
-// 3D для 88
-static const uint8_t SH88_3D   = 14;  // 0b1110
-// Swing off для 88
+static const uint8_t SH88_3D   = 14;
 static const uint8_t SV88_OFF  = 0;
 static const uint8_t SH88_OFF  = 0;
 
@@ -108,35 +101,15 @@ union Protocol88 {
   };
 };
 
-// ======== Коды режимов ========
+// ======== Коды протоколов ========
 
-// 152-bit modes
-static const uint8_t P152_AUTO = 0;
-static const uint8_t P152_COOL = 1;
-static const uint8_t P152_DRY  = 2;
-static const uint8_t P152_FAN  = 3;
-static const uint8_t P152_HEAT = 4;
+static const uint8_t P152_AUTO = 0, P152_COOL = 1, P152_DRY = 2, P152_FAN = 3, P152_HEAT = 4;
+static const uint8_t P88_AUTO  = 0, P88_COOL  = 1, P88_DRY  = 2, P88_FAN  = 3, P88_HEAT  = 4;
 
-// 88-bit modes
-static const uint8_t P88_AUTO = 0;
-static const uint8_t P88_COOL = 1;
-static const uint8_t P88_DRY  = 2;
-static const uint8_t P88_FAN  = 3;
-static const uint8_t P88_HEAT = 4;
+// ======== Коды вентиляторов ========
 
-// ======== Коды вентилятора ========
-
-// 152-bit fan speeds
-static const uint8_t F152_AUTO  = 0;
-static const uint8_t F152_LOW   = 1;
-static const uint8_t F152_MED   = 2;
-static const uint8_t F152_HIGH  = 3;
-
-// 88-bit fan speeds
-static const uint8_t F88_AUTO  = 0;
-static const uint8_t F88_LOW   = 2;
-static const uint8_t F88_MED   = 3;
-static const uint8_t F88_HIGH  = 4;
+static const uint8_t F152_AUTO = 0, F152_LOW = 1, F152_MED = 2, F152_HIGH = 3;
+static const uint8_t F88_AUTO  = 0, F88_LOW  = 2, F88_MED  = 3, F88_HIGH  = 4;
 
 // ======== Помощники ========
 
@@ -204,6 +177,7 @@ class MhiClimate : public climate_ir::ClimateIR {
              climate::CLIMATE_FAN_MEDIUM, climate::CLIMATE_FAN_HIGH},
             {climate::CLIMATE_SWING_OFF, climate::CLIMATE_SWING_VERTICAL,
              climate::CLIMATE_SWING_HORIZONTAL, climate::CLIMATE_SWING_BOTH},
+            // Добавляем OFF в supported hvac_modes
             {climate::CLIMATE_PRESET_NONE, climate::CLIMATE_PRESET_ECO,
              climate::CLIMATE_PRESET_BOOST, climate::CLIMATE_PRESET_ACTIVITY}),
         model_(ZJ), fan_levels_(FAN_LEVELS_3) {}
@@ -214,6 +188,16 @@ class MhiClimate : public climate_ir::ClimateIR {
  protected:
   climate::ClimateTraits traits() override {
     auto t = climate_ir::ClimateIR::traits();
+    // расширяем список HVAC-режимов, чтобы включить OFF
+    t.set_supported_modes({
+      climate::CLIMATE_MODE_OFF,
+      climate::CLIMATE_MODE_HEAT_COOL,
+      climate::CLIMATE_MODE_COOL,
+      climate::CLIMATE_MODE_HEAT,
+      climate::CLIMATE_MODE_DRY,
+      climate::CLIMATE_MODE_FAN_ONLY
+    });
+    // фан-режимы как было
     std::set<climate::ClimateFanMode> modes = {
         climate::CLIMATE_FAN_AUTO,
         climate::CLIMATE_FAN_LOW
@@ -222,6 +206,20 @@ class MhiClimate : public climate_ir::ClimateIR {
     modes.insert(climate::CLIMATE_FAN_MEDIUM);
     modes.insert(climate::CLIMATE_FAN_HIGH);
     t.set_supported_fan_modes(std::move(modes));
+    // свинг-режимы как было
+    t.set_supported_swing_modes({
+      climate::CLIMATE_SWING_OFF,
+      climate::CLIMATE_SWING_VERTICAL,
+      climate::CLIMATE_SWING_HORIZONTAL,
+      climate::CLIMATE_SWING_BOTH
+    });
+    // предустановки как было
+    t.set_supported_presets({
+      climate::CLIMATE_PRESET_NONE,
+      climate::CLIMATE_PRESET_ECO,
+      climate::CLIMATE_PRESET_BOOST,
+      climate::CLIMATE_PRESET_ACTIVITY
+    });
     return t;
   }
 

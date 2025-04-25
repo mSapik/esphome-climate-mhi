@@ -68,7 +68,7 @@ bool MhiClimate::on_receive(remote_base::RemoteReceiveData data) {
     uint8_t sv = msg.SwingV5 | (msg.SwingV7 << 1);
     uint8_t sh = msg.SwingH1 | (msg.SwingH2 << 2);
     this->swing_mode         = convert_swing(sv, sh);
-    if (msg.Clean)   this->preset = climate::CLIMATE_PRESET_ECO;
+    if (msg.Clean)    this->preset = climate::CLIMATE_PRESET_ECO;
     if (sh == SH88_3D) this->preset = climate::CLIMATE_PRESET_ACTIVITY;
   }
 
@@ -97,6 +97,8 @@ void MhiClimate::transmit_state() {
       auto tx = this->transmitter_->transmit();
       send_bytes(tx, off.raw, LEN_88);
     }
+    // При OFF мы сразу публикуем состояние, чтобы HA увидел OFF
+    this->publish_state();
     return;
   }
 
@@ -106,7 +108,7 @@ void MhiClimate::transmit_state() {
     std::memcpy(msg.Sig, SIG_152, SIG_152_LEN);
     msg.Power = 1;
     // Mode
-    if      (mode == climate::CLIMATE_MODE_COOL)    msg.Mode = P152_COOL;
+    if (mode == climate::CLIMATE_MODE_COOL)    msg.Mode = P152_COOL;
     else if (mode == climate::CLIMATE_MODE_HEAT)    msg.Mode = P152_HEAT;
     else if (mode == climate::CLIMATE_MODE_DRY)     msg.Mode = P152_DRY;
     else if (mode == climate::CLIMATE_MODE_FAN_ONLY) msg.Mode = P152_FAN;
@@ -131,6 +133,7 @@ void MhiClimate::transmit_state() {
     auto tx = this->transmitter_->transmit();
     send_bytes(tx, msg.raw, LEN_152);
     send_bytes(tx, msg.raw, LEN_152);
+
   } else {
     Protocol88 msg; std::memset(&msg, 0, sizeof(msg));
     std::memcpy(msg.Sig, SIG_88, SIG_152_LEN);
@@ -155,6 +158,9 @@ void MhiClimate::transmit_state() {
     auto tx = this->transmitter_->transmit();
     send_bytes(tx, msg.raw, LEN_88);
   }
+
+  // После отправки новых ON-настроек публикуем состояние
+  this->publish_state();
 }
 
 }  // namespace mhi_multi_ir
