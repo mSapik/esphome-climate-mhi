@@ -52,6 +52,7 @@ enum Model : uint8_t {
 
 // Eco / Clean
 #define MHI_ECO_ON        0x00
+#define MHI_ECO_OFF       0x10
 #define MHI_CLEAN_ON      0x00
 #define MHI_ZJ_CLEAN_OFF   0x20
 #define MHI_ZEA_CLEAN_OFF  0x08
@@ -97,6 +98,7 @@ enum Model : uint8_t {
 #define MHI_HS_MIDDLE     0x48
 #define MHI_HS_LEFTRIGHT  0x84
 #define MHI_HS_RIGHTLEFT  0x44
+#define MHI_HS_STOP       0xCC
 
 /** Количество уровней вентилятора, поддерживаемое блоком */
 enum SetFanLevels : uint8_t {
