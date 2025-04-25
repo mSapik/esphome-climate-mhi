@@ -9,35 +9,27 @@
 namespace esphome {
 namespace mhi_multi_ir {
 
-// ======== Константы и тайминги IR ========
+// IR-тайминги
+static const uint16_t HDR_MARK   = 3200;
+static const uint16_t HDR_SPACE  = 1600;
+static const uint16_t BIT_MARK   = 400;
+static const uint16_t ONE_SPACE  = 1200;
+static const uint16_t ZERO_SPACE = 400;
+static const uint16_t GAP_MIN    = 17500;
+static const uint32_t CARRIER_HZ = 38000;
 
-static const uint16_t HDR_MARK    = 3200;
-static const uint16_t HDR_SPACE   = 1600;
-static const uint16_t BIT_MARK    = 400;
-static const uint16_t ONE_SPACE   = 1200;
-static const uint16_t ZERO_SPACE  = 400;
-static const uint16_t GAP_MIN     = 17500;
-static const uint32_t CARRIER_HZ  = 38000;
+// Сигнатуры
+static const uint8_t SIG_LEN   = 5;
+static const uint8_t SIG_ZM[5] = {0xAD, 0x51, 0x3C, 0xE5, 0x1A};  // ZM/ZMP
+static const uint8_t SIG_ZJ[5] = {0xAD, 0x51, 0x3C, 0xD9, 0x26};  // ZJ/ZEA
 
-// ======== Сигнатуры ========
-
-static const uint8_t SIG_152_LEN = 5;
-static const uint8_t SIG_152[5]  = {0xAD, 0x51, 0x3C, 0xE5, 0x1A};  // ZM/ZMP
-static const uint8_t SIG_88[5]   = {0xAD, 0x51, 0x3C, 0xD9, 0x26};  // ZJ/ZEA
-
-// ======== Температура ========
-
+// Диапазон температуры
 static const uint8_t MIN_TEMP = 17;
 static const uint8_t MAX_TEMP = 31;
 
-// ======== Протокол 152-bit ========
-
-static const uint16_t LEN_152 = 19;
-
-static const uint8_t SV152_AUTO = 0;
-static const uint8_t SH152_AUTO = 0;
-static const uint8_t SV152_OFF  = 6;
-static const uint8_t SH152_OFF  = 8;
+// 152-битный протокол (ZM/ZMP)
+static const uint16_t LEN_152    = 19;
+static const uint8_t  SV152_AUTO = 0, SH152_AUTO = 0, SV152_OFF = 6, SH152_OFF = 8;
 
 union Protocol152 {
   uint8_t raw[LEN_152];
@@ -71,14 +63,9 @@ union Protocol152 {
   };
 };
 
-// ======== Протокол 88-bit ========
-
-static const uint16_t LEN_88 = 11;
-
-static const uint8_t SV88_AUTO = 0;
-static const uint8_t SH88_3D   = 14;
-static const uint8_t SV88_OFF  = 0;
-static const uint8_t SH88_OFF  = 0;
+// 88-битный протокол (ZJ/ZEA)
+static const uint16_t LEN_88    = 11;
+static const uint8_t  SV88_AUTO = 0, SH88_3D = 14, SV88_OFF = 0, SH88_OFF = 0;
 
 union Protocol88 {
   uint8_t raw[LEN_88];
@@ -101,23 +88,21 @@ union Protocol88 {
   };
 };
 
-// ======== Коды протоколов ========
-
+// Коды режимов
 static const uint8_t P152_AUTO = 0, P152_COOL = 1, P152_DRY = 2, P152_FAN = 3, P152_HEAT = 4;
 static const uint8_t P88_AUTO  = 0, P88_COOL  = 1, P88_DRY  = 2, P88_FAN  = 3, P88_HEAT  = 4;
 
-// ======== Коды вентиляторов ========
-
+// Коды скоростей вентилятора
 static const uint8_t F152_AUTO = 0, F152_LOW = 1, F152_MED = 2, F152_HIGH = 3;
 static const uint8_t F88_AUTO  = 0, F88_LOW  = 2, F88_MED  = 3, F88_HIGH  = 4;
 
-// ======== Помощники ========
-
+// Инверсия байтов-пар
 inline void invert_byte_pairs(uint8_t *data, size_t len) {
   for (size_t i = 0; i + 1 < len; i += 2)
     data[i + 1] = ~data[i];
 }
 
+// Преобразование в common-тип ESPHome
 inline climate::ClimateMode convert_mode152(uint8_t m) {
   switch (m) {
     case P152_COOL: return climate::CLIMATE_MODE_COOL;
@@ -139,18 +124,18 @@ inline climate::ClimateMode convert_mode88(uint8_t m) {
 
 inline climate::ClimateFanMode convert_fan152(uint8_t f) {
   switch (f) {
-    case F152_LOW:   return climate::CLIMATE_FAN_LOW;
-    case F152_MED:   return climate::CLIMATE_FAN_MEDIUM;
-    case F152_HIGH:  return climate::CLIMATE_FAN_HIGH;
-    default:         return climate::CLIMATE_FAN_AUTO;
+    case F152_LOW:  return climate::CLIMATE_FAN_LOW;
+    case F152_MED:  return climate::CLIMATE_FAN_MEDIUM;
+    case F152_HIGH: return climate::CLIMATE_FAN_HIGH;
+    default:        return climate::CLIMATE_FAN_AUTO;
   }
 }
 inline climate::ClimateFanMode convert_fan88(uint8_t f) {
   switch (f) {
-    case F88_LOW:   return climate::CLIMATE_FAN_LOW;
-    case F88_MED:   return climate::CLIMATE_FAN_MEDIUM;
-    case F88_HIGH:  return climate::CLIMATE_FAN_HIGH;
-    default:        return climate::CLIMATE_FAN_AUTO;
+    case F88_LOW:  return climate::CLIMATE_FAN_LOW;
+    case F88_MED:  return climate::CLIMATE_FAN_MEDIUM;
+    case F88_HIGH: return climate::CLIMATE_FAN_HIGH;
+    default:       return climate::CLIMATE_FAN_AUTO;
   }
 }
 
@@ -163,7 +148,7 @@ inline climate::ClimateSwingMode convert_swing(uint8_t sv, uint8_t sh) {
   return climate::CLIMATE_SWING_OFF;
 }
 
-// ======== ESPHome-класс ========
+// Наш компонент
 
 enum Model : uint8_t { ZJ = 0, ZEA = 1, ZM = 2, ZMP = 3 };
 enum SetFanLevels : uint8_t { FAN_LEVELS_3 = 3, FAN_LEVELS_4 = 4 };
@@ -173,56 +158,37 @@ class MhiClimate : public climate_ir::ClimateIR {
   MhiClimate()
       : climate_ir::ClimateIR(
             MIN_TEMP, MAX_TEMP, 1.0f, true, true,
-            {climate::CLIMATE_FAN_AUTO, climate::CLIMATE_FAN_LOW, climate::CLIMATE_FAN_MIDDLE,
-             climate::CLIMATE_FAN_MEDIUM, climate::CLIMATE_FAN_HIGH},
-            {climate::CLIMATE_SWING_OFF, climate::CLIMATE_SWING_VERTICAL,
-             climate::CLIMATE_SWING_HORIZONTAL, climate::CLIMATE_SWING_BOTH},
-            // Добавляем OFF в supported hvac_modes
-            {climate::CLIMATE_PRESET_NONE, climate::CLIMATE_PRESET_ECO,
-             climate::CLIMATE_PRESET_BOOST, climate::CLIMATE_PRESET_ACTIVITY}),
-        model_(ZJ), fan_levels_(FAN_LEVELS_3) {}
+            // поддерживаемые HVAC-режимы
+            {climate::CLIMATE_MODE_OFF,
+             climate::CLIMATE_MODE_HEAT_COOL,
+             climate::CLIMATE_MODE_COOL,
+             climate::CLIMATE_MODE_HEAT,
+             climate::CLIMATE_MODE_DRY,
+             climate::CLIMATE_MODE_FAN_ONLY},
+            // фан-режимы
+            {climate::CLIMATE_FAN_AUTO,
+             climate::CLIMATE_FAN_LOW,
+             climate::CLIMATE_FAN_MIDDLE,
+             climate::CLIMATE_FAN_MEDIUM,
+             climate::CLIMATE_FAN_HIGH,
+             climate::CLIMATE_FAN_FOCUS,
+             climate::CLIMATE_FAN_DIFFUSE},
+            // свинг-режимы
+            {climate::CLIMATE_SWING_OFF,
+             climate::CLIMATE_SWING_VERTICAL,
+             climate::CLIMATE_SWING_HORIZONTAL,
+             climate::CLIMATE_SWING_BOTH},
+            // пресеты
+            {climate::CLIMATE_PRESET_NONE,
+             climate::CLIMATE_PRESET_ECO,
+             climate::CLIMATE_PRESET_BOOST,
+             climate::CLIMATE_PRESET_ACTIVITY}) 
+      , model_(ZJ), fan_levels_(FAN_LEVELS_3) {}
 
-  void set_model(Model m)            { model_ = m; }
-  void set_fan_levels(SetFanLevels l){ fan_levels_ = l; }
+  void set_model(Model m)             { model_ = m; }
+  void set_fan_levels(SetFanLevels l) { fan_levels_ = l; }
 
  protected:
-  climate::ClimateTraits traits() override {
-    auto t = climate_ir::ClimateIR::traits();
-    // расширяем список HVAC-режимов, чтобы включить OFF
-    t.set_supported_modes({
-      climate::CLIMATE_MODE_OFF,
-      climate::CLIMATE_MODE_HEAT_COOL,
-      climate::CLIMATE_MODE_COOL,
-      climate::CLIMATE_MODE_HEAT,
-      climate::CLIMATE_MODE_DRY,
-      climate::CLIMATE_MODE_FAN_ONLY
-    });
-    // фан-режимы как было
-    std::set<climate::ClimateFanMode> modes = {
-        climate::CLIMATE_FAN_AUTO,
-        climate::CLIMATE_FAN_LOW
-    };
-    if (fan_levels_ == FAN_LEVELS_4) modes.insert(climate::CLIMATE_FAN_MIDDLE);
-    modes.insert(climate::CLIMATE_FAN_MEDIUM);
-    modes.insert(climate::CLIMATE_FAN_HIGH);
-    t.set_supported_fan_modes(std::move(modes));
-    // свинг-режимы как было
-    t.set_supported_swing_modes({
-      climate::CLIMATE_SWING_OFF,
-      climate::CLIMATE_SWING_VERTICAL,
-      climate::CLIMATE_SWING_HORIZONTAL,
-      climate::CLIMATE_SWING_BOTH
-    });
-    // предустановки как было
-    t.set_supported_presets({
-      climate::CLIMATE_PRESET_NONE,
-      climate::CLIMATE_PRESET_ECO,
-      climate::CLIMATE_PRESET_BOOST,
-      climate::CLIMATE_PRESET_ACTIVITY
-    });
-    return t;
-  }
-
   bool on_receive(remote_base::RemoteReceiveData data) override;
   void transmit_state() override;
 
