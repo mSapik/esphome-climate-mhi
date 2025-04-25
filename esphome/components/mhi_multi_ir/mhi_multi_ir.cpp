@@ -7,7 +7,7 @@ namespace mhi_multi_ir {
 
 static const char *TAG = "mhi_multi_ir.climate";
 
-// Универсальная функция отправки
+// Отправка IR-кадра
 template<typename Tx>
 static void send_bytes(Tx &tx, const uint8_t *buf, size_t len) {
   auto *d = tx.get_data();
@@ -26,7 +26,7 @@ static void send_bytes(Tx &tx, const uint8_t *buf, size_t len) {
 bool MhiClimate::on_receive(remote_base::RemoteReceiveData data) {
   ESP_LOGD(TAG, "on_receive model=%u", model_);
 
-  // Считаем полный кадр в vector
+  // 1) принимаем полный кадр в вектор
   size_t len = (model_ == ZM || model_ == ZMP) ? LEN_152 : LEN_88;
   std::vector<uint8_t> bytes(len);
   if (!data.expect_item(HDR_MARK, HDR_SPACE)) return false;
@@ -39,29 +39,29 @@ bool MhiClimate::on_receive(remote_base::RemoteReceiveData data) {
     bytes[i] = v;
   }
 
-  // Проверка сигнатуры
+  // 2) проверяем сигнатуру
   const uint8_t *sig = (model_ == ZM || model_ == ZMP) ? SIG_ZM : SIG_ZJ;
   if (std::memcmp(bytes.data(), sig, SIG_LEN) != 0) return false;
 
-  // Проверка зеркальных байтов
+  // 3) проверяем зеркальные байты
   for (size_t i = SIG_LEN; i + 1 < len; i += 2)
     if (bytes[i+1] != static_cast<uint8_t>(~bytes[i])) return false;
 
-  // Проверяем Power-бит
-  bool is_off;
+  // 4) проверяем Power-бит
+  bool is_off = false;
   if (model_ == ZM || model_ == ZMP)
-    is_off = (bytes[5] & 0x08) != 0;  // 1<<3 = OFF
+    is_off = (bytes[5] & 0x08) != 0;
   else
     is_off = (bytes[9] & 0x08) != 0;
 
   if (is_off) {
-    // Если OFF – сразу публикуем и выходим
+    // если выключено — сразу публикуем OFF и выходим
     this->mode = climate::CLIMATE_MODE_OFF;
     this->publish_state();
     return true;
   }
 
-  // Иначе разбираем поля
+  // 5) парсим остальное
   if (model_ == ZM || model_ == ZMP) {
     Protocol152 msg;
     std::memcpy(msg.raw, bytes.data(), LEN_152);
@@ -69,8 +69,9 @@ bool MhiClimate::on_receive(remote_base::RemoteReceiveData data) {
     this->target_temperature = msg.Temp + MIN_TEMP;
     this->fan_mode           = convert_fan152(msg.Fan);
     this->swing_mode         = convert_swing(msg.SwingV, msg.SwingH);
-    if (msg.Clean) this->preset = climate::CLIMATE_PRESET_ECO;
-    if (msg.Three) this->preset = climate::CLIMATE_PRESET_ACTIVITY;
+    if (msg.Clean)  this->preset = climate::CLIMATE_PRESET_ECO;
+    if (msg.Three)  this->preset = climate::CLIMATE_PRESET_ACTIVITY;
+
   } else {
     Protocol88 msg;
     std::memcpy(msg.raw, bytes.data(), LEN_88);
@@ -80,8 +81,8 @@ bool MhiClimate::on_receive(remote_base::RemoteReceiveData data) {
     uint8_t sv = msg.SwingV5 | (msg.SwingV7 << 1);
     uint8_t sh = msg.SwingH1 | (msg.SwingH2 << 2);
     this->swing_mode         = convert_swing(sv, sh);
-    if (msg.Clean) this->preset = climate::CLIMATE_PRESET_ECO;
-    if (sh == SH88_3D) this->preset = climate::CLIMATE_PRESET_ACTIVITY;
+    if (msg.Clean)             this->preset = climate::CLIMATE_PRESET_ECO;
+    if (sh == SH88_3D)         this->preset = climate::CLIMATE_PRESET_ACTIVITY;
   }
 
   this->publish_state();
@@ -96,7 +97,7 @@ void MhiClimate::transmit_state() {
     if (model_ == ZM || model_ == ZMP) {
       Protocol152 off; std::memset(&off, 0, sizeof(off));
       std::memcpy(off.Sig, SIG_ZM, SIG_LEN);
-      off.Power = 1;  // OFF
+      off.Power = 1;
       invert_byte_pairs(off.raw + SIG_LEN, LEN_152 - SIG_LEN);
       auto tx = this->transmitter_->transmit();
       send_bytes(tx, off.raw, LEN_152);
@@ -117,29 +118,23 @@ void MhiClimate::transmit_state() {
   if (model_ == ZM || model_ == ZMP) {
     Protocol152 msg; std::memset(&msg, 0, sizeof(msg));
     std::memcpy(msg.Sig, SIG_ZM, SIG_LEN);
-    msg.Power = 0;  // ON
-    // Mode
-    if      (mode == climate::CLIMATE_MODE_COOL)    msg.Mode = P152_COOL;
-    else if (mode == climate::CLIMATE_MODE_HEAT)    msg.Mode = P152_HEAT;
-    else if (mode == climate::CLIMATE_MODE_DRY)     msg.Mode = P152_DRY;
+    msg.Power = 0;
+    if      (mode == climate::CLIMATE_MODE_COOL)     msg.Mode = P152_COOL;
+    else if (mode == climate::CLIMATE_MODE_HEAT)     msg.Mode = P152_HEAT;
+    else if (mode == climate::CLIMATE_MODE_DRY)      msg.Mode = P152_DRY;
     else if (mode == climate::CLIMATE_MODE_FAN_ONLY) msg.Mode = P152_FAN;
-    else msg.Mode = P152_AUTO;
-    // Temp
+    else                                             msg.Mode = P152_AUTO;
     msg.Temp = static_cast<uint8_t>(target_temperature - MIN_TEMP);
-    // Fan
     if      (fan_mode == climate::CLIMATE_FAN_LOW)    msg.Fan = F152_LOW;
     else if (fan_mode == climate::CLIMATE_FAN_MEDIUM) msg.Fan = F152_MED;
     else if (fan_mode == climate::CLIMATE_FAN_HIGH)   msg.Fan = F152_HIGH;
-    else msg.Fan = F152_AUTO;
-    // Swing
-    if      (swing_mode == climate::CLIMATE_SWING_BOTH)    { msg.SwingV = SV152_AUTO; msg.SwingH = SH152_AUTO; }
-    else if (swing_mode == climate::CLIMATE_SWING_VERTICAL)   msg.SwingV = SV152_AUTO;
-    else if (swing_mode == climate::CLIMATE_SWING_HORIZONTAL) msg.SwingH = SH152_AUTO;
-    // Presets
+    else                                             msg.Fan = F152_AUTO;
+    if      (swing_mode == climate::CLIMATE_SWING_BOTH)     { msg.SwingV = SV152_AUTO; msg.SwingH = SH152_AUTO; }
+    else if (swing_mode == climate::CLIMATE_SWING_VERTICAL)  msg.SwingV = SV152_AUTO;
+    else if (swing_mode == climate::CLIMATE_SWING_HORIZONTAL)msg.SwingH = SH152_AUTO;
     msg.Clean = (preset == climate::CLIMATE_PRESET_ECO);
     msg.Three = (preset == climate::CLIMATE_PRESET_ACTIVITY);
     msg.D     = msg.Three;
-    // Инверсия
     invert_byte_pairs(msg.raw + SIG_LEN, LEN_152 - SIG_LEN);
 
     auto tx = this->transmitter_->transmit();
@@ -150,27 +145,21 @@ void MhiClimate::transmit_state() {
     Protocol88 msg; std::memset(&msg, 0, sizeof(msg));
     std::memcpy(msg.Sig, SIG_ZJ, SIG_LEN);
     msg.Power = 0;
-    // Mode
-    if      (mode == climate::CLIMATE_MODE_COOL)    msg.Mode = P88_COOL;
-    else if (mode == climate::CLIMATE_MODE_HEAT)    msg.Mode = P88_HEAT;
-    else if (mode == climate::CLIMATE_MODE_DRY)     msg.Mode = P88_DRY;
+    if      (mode == climate::CLIMATE_MODE_COOL)     msg.Mode = P88_COOL;
+    else if (mode == climate::CLIMATE_MODE_HEAT)     msg.Mode = P88_HEAT;
+    else if (mode == climate::CLIMATE_MODE_DRY)      msg.Mode = P88_DRY;
     else if (mode == climate::CLIMATE_MODE_FAN_ONLY) msg.Mode = P88_FAN;
-    else msg.Mode = P88_AUTO;
-    // Temp
+    else                                             msg.Mode = P88_AUTO;
     msg.Temp = static_cast<uint8_t>(target_temperature - MIN_TEMP);
-    // Fan
     if      (fan_mode == climate::CLIMATE_FAN_LOW)    msg.Fan = F88_LOW;
     else if (fan_mode == climate::CLIMATE_FAN_MEDIUM) msg.Fan = F88_MED;
     else if (fan_mode == climate::CLIMATE_FAN_HIGH)   msg.Fan = F88_HIGH;
-    else msg.Fan = F88_AUTO;
-    // 3D swing
+    else                                             msg.Fan = F88_AUTO;
     if (preset == climate::CLIMATE_PRESET_ACTIVITY) {
       msg.SwingH1 = SH88_3D & 0x3;
       msg.SwingH2 = (SH88_3D >> 2) & 0x3;
     }
-    // Clean preset
     msg.Clean = (preset == climate::CLIMATE_PRESET_ECO);
-    // Инверсия
     invert_byte_pairs(msg.raw + SIG_LEN, LEN_88 - SIG_LEN);
 
     auto tx = this->transmitter_->transmit();
