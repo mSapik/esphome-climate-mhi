@@ -1,153 +1,259 @@
-// mhi_multi_ir.h
 #pragma once
 
 #include "esphome/components/climate_ir/climate_ir.h"
+#include "esphome/components/remote_base/remote_base.h"
+#include <cinttypes>
+#include <cstring>
+#include <set>
 
 namespace esphome {
 namespace mhi_multi_ir {
 
-// Модели Mitsubishi Heavy
-enum Model : uint8_t {
-  ZJ  = 0,
-  ZM  = 1,
-  ZMP = 2,
-  ZEA = 3,
+// ======== Константы и тайминги IR ========
+
+static const uint16_t HDR_MARK    = 3200;
+static const uint16_t HDR_SPACE   = 1600;
+static const uint16_t BIT_MARK    = 400;
+static const uint16_t ONE_SPACE   = 1200;
+static const uint16_t ZERO_SPACE  = 400;
+static const uint16_t GAP_MIN     = 17500;
+static const uint32_t CARRIER_HZ  = 38000;
+
+// ======== Сигнатуры ========
+
+static const uint8_t SIG_152_LEN = 5;
+static const uint8_t SIG_152[5]  = { 0xAD, 0x51, 0x3C, 0xE5, 0x1A };  // ZM/ZMP
+static const uint8_t SIG_88[5]   = { 0xAD, 0x51, 0x3C, 0xD9, 0x26 };  // ZJ/ZEA
+
+// ======== Общие диапазоны ========
+
+static const uint8_t MIN_TEMP = 17;
+static const uint8_t MAX_TEMP = 31;
+
+// ======== Протокол 152-bit (ZM/ZMP) ========
+
+static const uint16_t LEN_152 = 19;
+
+union Protocol152 {
+  uint8_t raw[LEN_152];
+  struct {
+    uint8_t Sig[5];
+    uint8_t Mode   :3;
+    uint8_t Power  :1;
+    uint8_t        :1;
+    uint8_t Clean  :1;
+    uint8_t Filter :1;
+    uint8_t        :1;
+    uint8_t        :8;
+    uint8_t Temp   :4;
+    uint8_t        :4;
+    uint8_t        :8;
+    uint8_t Fan    :4;
+    uint8_t        :4;
+    uint8_t        :8;
+    uint8_t        :1;
+    uint8_t Three  :1;
+    uint8_t        :2;
+    uint8_t D      :1;
+    uint8_t SwingV :3;
+    uint8_t        :8;
+    uint8_t SwingH :4;
+    uint8_t        :4;
+    uint8_t        :8;
+    uint8_t        :6;
+    uint8_t Night  :1;
+    uint8_t Silent :1;
+  };
 };
 
-// Тайминги
-#define MHI_HDR_MARK    3200
-#define MHI_HDR_SPACE   1600
-#define MHI_BIT_MARK    400
-#define MHI_ONE_SPACE   1200
-#define MHI_ZERO_SPACE  400
-#define MHI_MIN_GAP     17500
+// ======== Протокол 88-bit (ZJ/ZEA) ========
 
-// Псевдо-заголовок
-#define MHI_P0          0x52
-#define MHI_P1          0xAE
-#define MHI_P2          0xC3
-#define MHI_P3_ZJZEPM   0x26
-#define MHI_P3_ZM       0x1A
-#define MHI_P4_ZJZEPM   0xD9
-#define MHI_P4_ZM       0xE5
+static const uint16_t LEN_88 = 11;
 
-// Питание
-#define MHI_OFF         0x08
-#define MHI_ON          0x00
+union Protocol88 {
+  uint8_t raw[LEN_88];
+  struct {
+    uint8_t Sig[5];
+    uint8_t        :1;
+    uint8_t SwingV5 :1;
+    uint8_t SwingH1 :2;
+    uint8_t        :1;
+    uint8_t Clean   :1;
+    uint8_t SwingH2 :2;
+    uint8_t        :8;
+    uint8_t        :3;
+    uint8_t SwingV7 :2;
+    uint8_t Fan     :3;
+    uint8_t        :8;
+    uint8_t Mode   :3;
+    uint8_t Power  :1;
+    uint8_t Temp   :4;
+  };
+};
 
-// Режимы
-#define MHI_AUTO        0x07
-#define MHI_HEAT        0x03
-#define MHI_COOL        0x06
-#define MHI_DRY         0x05
-#define MHI_FAN         0x04
-#define MHI_ZMP_MODE_FAN   0xD4
-#define MHI_ZMP_MODE_MAINT 0x06
+// ======== Константы протоколов ========
 
-// Вертикальный swing
-#define MHI_VS_SWING    0x0A
-#define MHI_VS_UP       0x02
-#define MHI_VS_MUP      0x18
-#define MHI_VS_MIDDLE   0x10
-#define MHI_VS_MDOWN    0x08
-#define MHI_VS_DOWN     0x00
-#define MHI_VS_STOP     0x1A
+// 152-bit modes
+static const uint8_t P152_AUTO = 0;
+static const uint8_t P152_COOL = 1;
+static const uint8_t P152_DRY  = 2;
+static const uint8_t P152_FAN  = 3;
+static const uint8_t P152_HEAT = 4;
 
-// Горизонтальный swing
-#define MHI_HS_SWING    0x4C
-#define MHI_HS_MIDDLE   0x48
-#define MHI_HS_LEFT     0xC8
-#define MHI_HS_MLEFT    0x88
-#define MHI_HS_MRIGHT   0x08
-#define MHI_HS_RIGHT    0xC4
-#define MHI_HS_STOP     0xCC
-#define MHI_HS_LEFTRIGHT 0x84
-#define MHI_HS_RIGHTLEFT 0x44
-#define MHI_HS_3DAUTO   0x04
+// 88-bit modes
+static const uint8_t P88_AUTO = 0;
+static const uint8_t P88_COOL = 1;
+static const uint8_t P88_DRY  = 2;
+static const uint8_t P88_FAN  = 3;
+static const uint8_t P88_HEAT = 4;
 
-// 3D auto / silent
-#define MHI_3DAUTO_ON   0x00
-#define MHI_3DAUTO_OFF  0x12
-#define MHI_SILENT_ON   0x00
-#define MHI_SILENT_OFF  0x80
+// 152-bit fan speeds
+static const uint8_t F152_AUTO  = 0;
+static const uint8_t F152_LOW   = 1;
+static const uint8_t F152_MED   = 2;
+static const uint8_t F152_HIGH  = 3;
+static const uint8_t F152_MAX   = 4;
+static const uint8_t F152_ECONO = 6;
+static const uint8_t F152_TURBO = 8;
 
-// Eco / Clean
-#define MHI_ECO_ON      0x00
-#define MHI_ECO_OFF     0x10
-#define MHI_CLEAN_ON    0x00
-#define MHI_ZJ_CLEAN_OFF 0x20
-#define MHI_ZEA_CLEAN_OFF 0x08
-#define MHI_ZM_CLEAN_OFF 0x60
-#define MHI_ZMP_CLEAN_OFF 0x20
-#define MHI_ZMP_CLEAN_ON 0xDF
+// 88-bit fan speeds
+static const uint8_t F88_AUTO  = 0;
+static const uint8_t F88_LOW   = 2;
+static const uint8_t F88_MED   = 3;
+static const uint8_t F88_HIGH  = 4;
+static const uint8_t F88_TURBO = 6;
+static const uint8_t F88_ECONO = 7;
 
-// Fan speeds
-// ZJ
-#define MHI_ZJ_FAN_AUTO 0xE0
-#define MHI_ZJ_FAN1     0xA0
-#define MHI_ZJ_FAN2     0x80
-#define MHI_ZJ_FAN3     0x60
-#define MHI_ZJ_HIPOWER  0x40
-#define MHI_ZJ_ECONO    0x00
-// ZEA
-#define MHI_ZEA_FAN_AUTO 0xE0
-#define MHI_ZEA_FAN1     0xC2
-#define MHI_ZEA_FAN2     0xA4
-#define MHI_ZEA_FAN3     0x86
-#define MHI_ZEA_FAN4     0x68
-#define MHI_ZEA_HIPOWER  0x2C
-#define MHI_ZEA_ECONO    0x0E
-// ZM
-#define MHI_ZM_FAN_AUTO  0x0F
-#define MHI_ZM_FAN1      0x0E
-#define MHI_ZM_FAN2      0x0D
-#define MHI_ZM_FAN3      0x0C
-#define MHI_ZM_FAN4      0x0B
-#define MHI_ZM_HIPOWER   0x07
-#define MHI_ZM_ECONO     0x09
-// ZMP
-#define MHI_ZMP_FAN_AUTO 0xE0
-#define MHI_ZMP_FAN1     0xA0
-#define MHI_ZMP_FAN2     0x80
-#define MHI_ZMP_FAN3     0x60
-#define MHI_ZMP_HIPOWER  0x20
-#define MHI_ZMP_ECONO    0x00
+// Swing values — пример, для 152
+static const uint8_t SV152_AUTO    = 0;
+static const uint8_t SV152_HIGHEST = 1;
+static const uint8_t SV152_HIGH    = 2;
+static const uint8_t SV152_MID     = 3;
+static const uint8_t SV152_LOW     = 4;
+static const uint8_t SV152_OFF     = 6;
+
+// Swing H 152
+static const uint8_t SH152_AUTO      = 0;
+static const uint8_t SH152_LEFTMAX   = 1;
+static const uint8_t SH152_LEFT      = 2;
+static const uint8_t SH152_MID       = 3;
+static const uint8_t SH152_RIGHT     = 4;
+static const uint8_t SH152_RIGHTMAX  = 5;
+static const uint8_t SH152_OFF       = 8;
+
+// Swing values — 88
+static const uint8_t SV88_AUTO  = 0;
+static const uint8_t SV88_HIGHEST = 6;  // 0b110
+static const uint8_t SV88_MID     = 3;  // 0b011
+static const uint8_t SV88_OFF     = 0;
+
+// Swing H 88
+static const uint8_t SH88_AUTO  = 8;    // 0b1000
+static const uint8_t SH88_3D    = 14;   // 0b1110
+static const uint8_t SH88_OFF   = 0;
+
+// ======== Помощники ========
+
+inline void invert_byte_pairs(uint8_t *data, size_t len) {
+  for (size_t i = 0; i + 1 < len; i += 2)
+    data[i + 1] = ~data[i];
+}
+
+// Преобразования в common-формат ESPHome
+inline climate::ClimateMode convert_mode152(uint8_t m) {
+  switch (m) {
+    case P152_COOL: return climate::CLIMATE_MODE_COOL;
+    case P152_HEAT: return climate::CLIMATE_MODE_HEAT;
+    case P152_DRY:  return climate::CLIMATE_MODE_DRY;
+    case P152_FAN:  return climate::CLIMATE_MODE_FAN_ONLY;
+    default:        return climate::CLIMATE_MODE_HEAT_COOL;
+  }
+}
+inline climate::ClimateMode convert_mode88(uint8_t m) {
+  switch (m) {
+    case P88_COOL: return climate::CLIMATE_MODE_COOL;
+    case P88_HEAT: return climate::CLIMATE_MODE_HEAT;
+    case P88_DRY:  return climate::CLIMATE_MODE_DRY;
+    case P88_FAN:  return climate::CLIMATE_MODE_FAN_ONLY;
+    default:       return climate::CLIMATE_MODE_HEAT_COOL;
+  }
+}
+
+inline climate::ClimateFanMode convert_fan152(uint8_t f) {
+  switch (f) {
+    case F152_LOW:   return climate::CLIMATE_FAN_LOW;
+    case F152_MED:   return climate::CLIMATE_FAN_MEDIUM;
+    case F152_HIGH:  return climate::CLIMATE_FAN_HIGH;
+    case F152_ECONO: return climate::CLIMATE_FAN_DIFFUSE;
+    case F152_TURBO: return climate::CLIMATE_FAN_FOCUS;
+    default:         return climate::CLIMATE_FAN_AUTO;
+  }
+}
+inline climate::ClimateFanMode convert_fan88(uint8_t f) {
+  switch (f) {
+    case F88_LOW:   return climate::CLIMATE_FAN_LOW;
+    case F88_MED:   return climate::CLIMATE_FAN_MEDIUM;
+    case F88_HIGH:  return climate::CLIMATE_FAN_HIGH;
+    case F88_ECONO: return climate::CLIMATE_FAN_DIFFUSE;
+    case F88_TURBO: return climate::CLIMATE_FAN_FOCUS;
+    default:        return climate::CLIMATE_FAN_AUTO;
+  }
+}
+
+inline climate::ClimateSwingMode convert_swing(uint8_t sv, uint8_t sh) {
+  const bool vs = (sv != SV152_OFF && sv != SV88_OFF);
+  const bool hs = (sh != SH152_OFF && sh != SH88_OFF);
+  if (vs && hs) return climate::CLIMATE_SWING_BOTH;
+  if (vs)       return climate::CLIMATE_SWING_VERTICAL;
+  if (hs)       return climate::CLIMATE_SWING_HORIZONTAL;
+  return climate::CLIMATE_SWING_OFF;
+}
+
+// ======== ESPHome-класс ========
+
+enum Model : uint8_t { ZJ = 0, ZEA = 1, ZM = 2, ZMP = 3 };
+
+enum SetFanLevels : uint8_t { FAN_LEVELS_3 = 3, FAN_LEVELS_4 = 4 };
 
 class MhiClimate : public climate_ir::ClimateIR {
  public:
   MhiClimate()
-    : climate_ir::ClimateIR(
-        18, 30, 1.0f, true, true,
-        std::set<climate::ClimateFanMode>{
-          climate::CLIMATE_FAN_AUTO,
-          climate::CLIMATE_FAN_LOW,
-          climate::CLIMATE_FAN_MEDIUM,
-          climate::CLIMATE_FAN_HIGH,
-          climate::CLIMATE_FAN_MIDDLE,
-          climate::CLIMATE_FAN_FOCUS,
-          climate::CLIMATE_FAN_DIFFUSE},
-        std::set<climate::ClimateSwingMode>{
-          climate::CLIMATE_SWING_OFF,
-          climate::CLIMATE_SWING_VERTICAL,
-          climate::CLIMATE_SWING_HORIZONTAL,
-          climate::CLIMATE_SWING_BOTH},
-        std::set<climate::ClimatePreset>{
-          climate::CLIMATE_PRESET_NONE,
-          climate::CLIMATE_PRESET_ECO,
-          climate::CLIMATE_PRESET_BOOST,
-          climate::CLIMATE_PRESET_ACTIVITY})
-    , model_(ZJ) {}
+      : climate_ir::ClimateIR(
+          MIN_TEMP, MAX_TEMP, 1.0f, true, true,
+          {climate::CLIMATE_FAN_AUTO, climate::CLIMATE_FAN_LOW, climate::CLIMATE_FAN_MIDDLE,
+           climate::CLIMATE_FAN_MEDIUM, climate::CLIMATE_FAN_HIGH, climate::CLIMATE_FAN_FOCUS,
+           climate::CLIMATE_FAN_DIFFUSE},
+          {climate::CLIMATE_SWING_OFF, climate::CLIMATE_SWING_VERTICAL,
+           climate::CLIMATE_SWING_HORIZONTAL, climate::CLIMATE_SWING_BOTH},
+          {climate::CLIMATE_PRESET_NONE, climate::CLIMATE_PRESET_ECO,
+           climate::CLIMATE_PRESET_BOOST, climate::CLIMATE_PRESET_ACTIVITY}) 
+      , model_(ZJ), fan_levels_(FAN_LEVELS_3) {}
 
-  void set_model(Model m) { model_ = m; }
+  void set_model(Model m)           { model_ = m; }
+  void set_fan_levels(SetFanLevels l){ fan_levels_ = l; }
 
  protected:
-  void transmit_state() override;
+  climate::ClimateTraits traits() override {
+    auto t = climate_ir::ClimateIR::traits();
+    std::set<climate::ClimateFanMode> modes = {
+      climate::CLIMATE_FAN_AUTO,
+      climate::CLIMATE_FAN_LOW
+    };
+    if (fan_levels_ == FAN_LEVELS_4) modes.insert(climate::CLIMATE_FAN_MIDDLE);
+    modes.insert(climate::CLIMATE_FAN_MEDIUM);
+    modes.insert(climate::CLIMATE_FAN_HIGH);
+    modes.insert(climate::CLIMATE_FAN_FOCUS);
+    modes.insert(climate::CLIMATE_FAN_DIFFUSE);
+    t.set_supported_fan_modes(std::move(modes));
+    return t;
+  }
+
   bool on_receive(remote_base::RemoteReceiveData data) override;
+  void transmit_state() override;
 
  private:
   Model model_;
-
-  static void send_bytes(remote_base::RemoteTransmitData *data, const uint8_t *tpl, size_t len);
+  SetFanLevels fan_levels_;
 };
 
 }  // namespace mhi_multi_ir

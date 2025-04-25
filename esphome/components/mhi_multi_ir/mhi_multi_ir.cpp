@@ -1,234 +1,159 @@
-// mhi_multi_ir.cpp
 #include "mhi_multi_ir.h"
 #include "esphome/core/log.h"
-#include <cstring>
 
 namespace esphome {
 namespace mhi_multi_ir {
 
 static const char *TAG = "mhi_multi_ir.climate";
 
-void MhiClimate::send_bytes(remote_base::RemoteTransmitData *data, const uint8_t *tpl, size_t len) {
+// Универсальная отправка битов
+template<typename Tx>
+static void send_bytes(Tx &tx, const uint8_t *buf, size_t len) {
+  auto *d = tx.get_data();
+  d->set_carrier_frequency(CARRIER_HZ);
+  d->mark(HDR_MARK); d->space(HDR_SPACE);
   for (size_t i = 0; i < len; i++) {
-    for (int b = 0; b < 8; b++) {
-      data->mark(MHI_BIT_MARK);
-      data->space((tpl[i] & (1 << b)) ? MHI_ONE_SPACE : MHI_ZERO_SPACE);
+    for (uint8_t b = 0; b < 8; b++) {
+      d->mark(BIT_MARK);
+      d->space((buf[i] & (1<<b)) ? ONE_SPACE : ZERO_SPACE);
     }
   }
+  d->mark(BIT_MARK); d->space(0);
+  tx.perform();
 }
 
 bool MhiClimate::on_receive(remote_base::RemoteReceiveData data) {
-  ESP_LOGD(TAG, "on_receive start");
-  if (!data.expect_item(MHI_HDR_MARK, MHI_HDR_SPACE)) return false;
+  ESP_LOGD(TAG, "on_receive model=%u", model_);
 
-  uint8_t bytes[19] = {};
-  for (int i = 0; i < 19; i++) {
-    uint8_t v = 0;
-    for (int b = 0; b < 8; b++) {
-      if (data.expect_item(MHI_BIT_MARK, MHI_ONE_SPACE))
-        v |= (1 << b);
-      else if (!data.expect_item(MHI_BIT_MARK, MHI_ZERO_SPACE))
-        return false;
+  // Выбираем union и длину
+  if (model_ == ZM || model_ == ZMP) {
+    Protocol152 msg; size_t len = LEN_152;
+    if (!data.expect_item(HDR_MARK, HDR_SPACE)) return false;
+    for (size_t i = 0; i < len; i++) {
+      uint8_t v = 0;
+      for (int b = 0; b < 8; b++) {
+        if (data.expect_item(BIT_MARK, ONE_SPACE))      v |= 1<<b;
+        else if (!data.expect_item(BIT_MARK, ZERO_SPACE)) return false;
+      }
+      msg.raw[i] = v;
+      if (i >= SIG_152_LEN && i % 2 == SIG_152_LEN%2) {
+        // проверка инверсии пар
+        if (msg.raw[i] != static_cast<uint8_t>(~msg.raw[i^1])) return false;
+      }
     }
-    bytes[i] = v;
-  }
+    // Проверяем сигнатуру
+    if (std::memcmp(msg.Sig, SIG_152, SIG_152_LEN) != 0) return false;
 
-  if (bytes[0] != MHI_P0 || bytes[1] != MHI_P1 || bytes[2] != MHI_P2 ||
-      (bytes[3] != MHI_P3_ZJZEPM && bytes[3] != MHI_P3_ZM) ||
-      (bytes[4] != MHI_P4_ZJZEPM && bytes[4] != MHI_P4_ZM))
-    return false;
-  if (bytes[5] != uint8_t(~bytes[6]) ||
-      bytes[7] != uint8_t(~bytes[8]) ||
-      bytes[9] != uint8_t(~bytes[10]))
-    return false;
+    // Преобразуем
+    this->mode                = convert_mode152(msg.Mode);
+    this->target_temperature  = msg.Temp + MIN_TEMP;
+    this->fan_mode            = convert_fan152(msg.Fan);
+    this->swing_mode          = convert_swing(msg.SwingV, msg.SwingH);
+    if (msg.Econ o) this->preset = climate::CLIMATE_PRESET_ECO;
+    if (msg.Three)  this->preset = climate::CLIMATE_PRESET_ACTIVITY;
 
-  uint8_t pwr = bytes[9] & 0x08;
-  uint8_t md  = bytes[9] & 0x07;
-  uint8_t tmp = ((~bytes[9] & 0xF0) >> 4) + 17;
-  uint8_t fan = bytes[7] & 0xE0;
-  uint8_t sv  = (bytes[5] & 0x02) | (bytes[7] & 0x18);
-  uint8_t sh  = bytes[5] & 0xCC;
-
-  if (pwr == MHI_ON) {
-    switch (md) {
-      case MHI_HEAT: this->mode = climate::CLIMATE_MODE_HEAT; break;
-      case MHI_COOL: this->mode = climate::CLIMATE_MODE_COOL; break;
-      case MHI_DRY:  this->mode = climate::CLIMATE_MODE_DRY; break;
-      case MHI_FAN:  this->mode = climate::CLIMATE_MODE_FAN_ONLY; break;
-      default:       this->mode = climate::CLIMATE_MODE_AUTO; break;
-    }
   } else {
-    this->mode = climate::CLIMATE_MODE_OFF;
+    Protocol88 msg; size_t len = LEN_88;
+    if (!data.expect_item(HDR_MARK, HDR_SPACE)) return false;
+    for (size_t i = 0; i < len; i++) {
+      uint8_t v = 0;
+      for (int b = 0; b < 8; b++) {
+        if (data.expect_item(BIT_MARK, ONE_SPACE))      v |= 1<<b;
+        else if (!data.expect_item(BIT_MARK, ZERO_SPACE)) return false;
+      }
+      msg.raw[i] = v;
+      if (i >= SIG_152_LEN && i % 2 == SIG_152_LEN%2) {
+        if (msg.raw[i] != static_cast<uint8_t>(~msg.raw[i^1])) return false;
+      }
+    }
+    if (std::memcmp(msg.Sig, SIG_88, SIG_152_LEN) != 0) return false;
+
+    this->mode               = convert_mode88(msg.Mode);
+    this->target_temperature = msg.Temp + MIN_TEMP;
+    this->fan_mode           = convert_fan88(msg.Fan);
+    this->swing_mode         = convert_swing(msg.SwingV5 | (msg.SwingV7<<1), msg.SwingH1 | (msg.SwingH2<<2));
+    if (msg.Clean) this->preset = climate::CLIMATE_PRESET_ECO;
+    if (msg.SwingH2 == 1) this->preset = climate::CLIMATE_PRESET_ACTIVITY;
   }
-  this->target_temperature = tmp;
-
-  if (sv == MHI_VS_SWING && sh == MHI_HS_SWING)
-    this->swing_mode = climate::CLIMATE_SWING_BOTH;
-  else if (sv == MHI_VS_SWING)
-    this->swing_mode = climate::CLIMATE_SWING_VERTICAL;
-  else if (sh == MHI_HS_SWING)
-    this->swing_mode = climate::CLIMATE_SWING_HORIZONTAL;
-  else
-    this->swing_mode = climate::CLIMATE_SWING_OFF;
-
-  if      (fan == MHI_ZJ_FAN1  || fan == MHI_ZEA_FAN1  || fan == MHI_ZM_FAN1  || fan == MHI_ZMP_FAN1) this->fan_mode = climate::CLIMATE_FAN_LOW;
-  else if (fan == MHI_ZJ_FAN2  || fan == MHI_ZEA_FAN2  || fan == MHI_ZM_FAN2  || fan == MHI_ZMP_FAN2) this->fan_mode = climate::CLIMATE_FAN_MEDIUM;
-  else if (fan == MHI_ZJ_FAN3  || fan == MHI_ZEA_FAN3  || fan == MHI_ZM_FAN3  || fan == MHI_ZMP_FAN3) this->fan_mode = climate::CLIMATE_FAN_HIGH;
-  else                                                                                          this->fan_mode = climate::CLIMATE_FAN_AUTO;
 
   this->publish_state();
   return true;
 }
 
 void MhiClimate::transmit_state() {
-  auto tx = this->transmitter_->transmit();
-  auto *data = tx.get_data();
-  data->set_carrier_frequency(38000);
-  data->mark(MHI_HDR_MARK);
-  data->space(MHI_HDR_SPACE);
+  ESP_LOGD(TAG, "transmit_state model=%u", model_);
 
-  switch (model_) {
-    case ZJ: {
-      const uint8_t tpl[11] = {MHI_P0,MHI_P1,MHI_P2,MHI_P3_ZJZEPM,MHI_P4_ZJZEPM,0x11,0x00,0x07,0x00,0x00,0x00};
-      uint8_t buf[11]; std::memcpy(buf, tpl, 11);
-      uint8_t pm = (this->mode==climate::CLIMATE_MODE_OFF?MHI_OFF:MHI_ON);
-      uint8_t om = (this->mode==climate::CLIMATE_MODE_HEAT?MHI_HEAT:
-                    this->mode==climate::CLIMATE_MODE_COOL?MHI_COOL:
-                    this->mode==climate::CLIMATE_MODE_DRY?MHI_DRY:
-                    this->mode==climate::CLIMATE_MODE_FAN_ONLY?MHI_FAN:
-                    MHI_AUTO);
-      uint8_t t  = uint8_t((this->target_temperature>17&&this->target_temperature<31)?
-                   (~((uint8_t)(this->target_temperature-17)<<4)&0xF0):0);
-      uint8_t fs = MHI_ZJ_FAN_AUTO;
-      switch (this->fan_mode.value()) {
-        case climate::CLIMATE_FAN_LOW:    fs=MHI_ZJ_FAN1; break;
-        case climate::CLIMATE_FAN_MEDIUM: fs=MHI_ZJ_FAN2; break;
-        case climate::CLIMATE_FAN_HIGH:   fs=MHI_ZJ_FAN3; break;
-        default:                          fs=MHI_ZJ_FAN_AUTO; break;
-      }
-      uint8_t sv= MHI_VS_STOP, sh= MHI_HS_STOP;
-      switch (this->swing_mode) {
-        case climate::CLIMATE_SWING_BOTH:     sv=MHI_VS_SWING; sh=MHI_HS_SWING; break;
-        case climate::CLIMATE_SWING_VERTICAL: sv=MHI_VS_SWING; break;
-        case climate::CLIMATE_SWING_HORIZONTAL: sh=MHI_HS_SWING; break;
-        default: break;
-      }
-      buf[5] |= sh | (sv & 0x02) | MHI_ZJ_CLEAN_OFF;
-      buf[7] |= fs | (sv & 0x18);
-      buf[9] |= om | pm | t;
-      buf[6]=~buf[5]; buf[8]=~buf[7]; buf[10]=~buf[9];
-      send_bytes(data, buf, 11);
-      break;
+  // Выбираем union
+  if (model_ == ZM || model_ == ZMP) {
+    Protocol152 msg; std::memset(&msg, 0, sizeof(msg));
+    std::memcpy(msg.Sig, SIG_152, SIG_152_LEN);
+    msg.Power = (mode!=climate::CLIMATE_MODE_OFF);
+    // Режим
+    switch (mode) {
+      case climate::CLIMATE_MODE_COOL: msg.Mode = P152_COOL; break;
+      case climate::CLIMATE_MODE_HEAT: msg.Mode = P152_HEAT; break;
+      case climate::CLIMATE_MODE_DRY:  msg.Mode = P152_DRY;  break;
+      case climate::CLIMATE_MODE_FAN_ONLY: msg.Mode = P152_FAN; break;
+      default: msg.Mode = P152_AUTO;
     }
-    case ZEA: {
-      const uint8_t tpl[11] = {MHI_P0,MHI_P1,MHI_P2,MHI_P3_ZJZEPM,MHI_P4_ZJZEPM,0xDF,0x20,0x07,0x00,0x00,0x00};
-      uint8_t buf[11]; std::memcpy(buf, tpl, 11);
-      uint8_t pm = (this->mode==climate::CLIMATE_MODE_OFF?MHI_OFF:MHI_ON);
-      uint8_t om = (this->mode==climate::CLIMATE_MODE_HEAT?MHI_HEAT:
-                    this->mode==climate::CLIMATE_MODE_COOL?MHI_COOL:
-                    this->mode==climate::CLIMATE_MODE_DRY?MHI_DRY:
-                    this->mode==climate::CLIMATE_MODE_FAN_ONLY?MHI_FAN:
-                    MHI_AUTO);
-      uint8_t t  = uint8_t((this->target_temperature>17&&this->target_temperature<31)?
-                   (~((uint8_t)(this->target_temperature-17)<<4)&0xF0):0);
-      uint8_t fs = MHI_ZEA_FAN_AUTO;
-      switch (this->fan_mode.value()) {
-        case climate::CLIMATE_FAN_LOW:    fs=MHI_ZEA_FAN1; break;
-        case climate::CLIMATE_FAN_MEDIUM: fs=MHI_ZEA_FAN2; break;
-        case climate::CLIMATE_FAN_HIGH:   fs=MHI_ZEA_FAN3; break;
-        case climate::CLIMATE_FAN_MIDDLE: fs=MHI_ZEA_FAN4; break;
-        default:                          fs=MHI_ZEA_FAN_AUTO; break;
-      }
-      uint8_t sv=MHI_VS_STOP, sh=MHI_HS_STOP;
-      switch (this->swing_mode) {
-        case climate::CLIMATE_SWING_BOTH:     sv=MHI_VS_SWING; sh=MHI_HS_SWING; break;
-        case climate::CLIMATE_SWING_VERTICAL: sv=MHI_VS_SWING; break;
-        case climate::CLIMATE_SWING_HORIZONTAL: sh=MHI_HS_SWING; break;
-        default: break;
-      }
-      buf[5]|=(sh&0xF0)|((sv>>1)&0x01)|MHI_ZEA_CLEAN_OFF;
-      buf[6]|=((sh<<4)&0xF0)|(sv&0x01);
-      buf[7]|=(fs&0xE0)|((sv>>1)&0x18);
-      buf[8]|=((fs<<4)&0xE0)|((sv>>1)&0x18);
-      buf[9]|=om|pm|t;
-      buf[6]=~buf[5]; buf[8]=~buf[7]; buf[10]=~buf[9];
-      send_bytes(data, buf, 11);
-      break;
+    msg.Temp  = static_cast<uint8_t>(target_temperature - MIN_TEMP);
+    // Fan
+    switch (fan_mode) {
+      case climate::CLIMATE_FAN_LOW:    msg.Fan = F152_LOW;   break;
+      case climate::CLIMATE_FAN_MEDIUM: msg.Fan = F152_MED;   break;
+      case climate::CLIMATE_FAN_HIGH:   msg.Fan = F152_HIGH;  break;
+      default: msg.Fan = F152_AUTO;
     }
-    case ZM: {
-      const uint8_t tpl[19] = {MHI_P0,MHI_P1,MHI_P2,MHI_P3_ZM,MHI_P4_ZM,
-                               0x90,0x00,0xF0,0x00,0xF0,0x00,0x0D,0x00,0x10,0x00,0xFF,0x00,0x7B,0x00};
-      uint8_t buf[19]; std::memcpy(buf, tpl, 19);
-      uint8_t pm = (this->mode==climate::CLIMATE_MODE_OFF?MHI_OFF:MHI_ON);
-      uint8_t om = (this->mode==climate::CLIMATE_MODE_HEAT?MHI_HEAT:
-                    this->mode==climate::CLIMATE_MODE_COOL?MHI_COOL:
-                    this->mode==climate::CLIMATE_MODE_DRY?MHI_DRY:
-                    this->mode==climate::CLIMATE_MODE_FAN_ONLY?MHI_FAN:
-                    MHI_AUTO);
-      uint8_t t  = uint8_t((this->target_temperature>17&&this->target_temperature<31)?
-                   (~((uint8_t)(this->target_temperature-17)<<4)&0xF0):0);
-      uint8_t fs = MHI_ZM_FAN_AUTO;
-      switch (this->fan_mode.value()) {
-        case climate::CLIMATE_FAN_LOW:    fs=MHI_ZM_FAN1; break;
-        case climate::CLIMATE_FAN_MEDIUM: fs=MHI_ZM_FAN2; break;
-        case climate::CLIMATE_FAN_HIGH:   fs=MHI_ZM_FAN3; break;
-        case climate::CLIMATE_FAN_MIDDLE: fs=MHI_ZM_FAN4; break;
-        default:                          fs=MHI_ZM_FAN_AUTO; break;
-      }
-      uint8_t sv=MHI_VS_STOP, hd=0, d3=MHI_3DAUTO_OFF, sl=MHI_SILENT_OFF;
-      switch (this->swing_mode) {
-        case climate::CLIMATE_SWING_BOTH:     sv=MHI_VS_SWING; hd=MHI_HS_SWING; break;
-        case climate::CLIMATE_SWING_VERTICAL: sv=MHI_VS_SWING; break;
-        case climate::CLIMATE_SWING_HORIZONTAL: hd=MHI_HS_SWING; break;
-        default: break;
-      }
-      buf[5]|=om|pm|MHI_ZM_CLEAN_OFF; buf[6]=~buf[5];
-      buf[7]|=t;                    buf[8]=~buf[7];
-      buf[9]|=fs;                   buf[10]=~buf[9];
-      buf[11]|=sv|d3;               buf[12]=~buf[11];
-      buf[13]|=hd|sv;               buf[14]=~buf[13];
-      buf[15]|=sl;                  buf[16]=~buf[15];
-      buf[17]=0;                    buf[18]=~buf[17];
-      send_bytes(data, buf, 19);
-      break;
+    // Swing
+    switch (swing_mode) {
+      case climate::CLIMATE_SWING_BOTH:    msg.SwingV=SV152_AUTO, msg.SwingH=SH152_AUTO; break;
+      case climate::CLIMATE_SWING_VERTICAL:   msg.SwingV=SV152_AUTO; break;
+      case climate::CLIMATE_SWING_HORIZONTAL: msg.SwingH=SH152_AUTO; break;
+      default: break;
     }
-    case ZMP: {
-      const uint8_t tpl[11] = {MHI_P0,MHI_P1,MHI_P2,MHI_P3_ZJZEPM,MHI_P4_ZJZEPM,
-                               0x11,0x00,0x07,0x00,0x00,0x00};
-      uint8_t buf[11]; std::memcpy(buf, tpl, 11);
-      uint8_t pm = (this->mode==climate::CLIMATE_MODE_OFF?MHI_OFF:MHI_ON);
-      uint8_t om = (this->mode==climate::CLIMATE_MODE_HEAT?MHI_HEAT:
-                    this->mode==climate::CLIMATE_MODE_COOL?MHI_COOL:
-                    this->mode==climate::CLIMATE_MODE_DRY?MHI_DRY:
-                    this->mode==climate::CLIMATE_MODE_FAN_ONLY?MHI_FAN:
-                    MHI_AUTO);
-      uint8_t t  = uint8_t((this->target_temperature>17&&this->target_temperature<31)?
-                   (~((uint8_t)(this->target_temperature-17)<<4)&0xF0):0);
-      uint8_t fs = MHI_ZMP_FAN_AUTO;
-      switch (this->fan_mode.value()) {
-        case climate::CLIMATE_FAN_LOW:    fs=MHI_ZMP_FAN1; break;
-        case climate::CLIMATE_FAN_MEDIUM: fs=MHI_ZMP_FAN2; break;
-        case climate::CLIMATE_FAN_HIGH:   fs=MHI_ZMP_FAN3; break;
-        default:                          fs=MHI_ZMP_FAN_AUTO; break;
-      }
-      uint8_t sv=MHI_VS_STOP, hd=0;
-      switch (this->swing_mode) {
-        case climate::CLIMATE_SWING_BOTH:     sv=MHI_VS_SWING; hd=MHI_HS_SWING; break;
-        case climate::CLIMATE_SWING_VERTICAL: sv=MHI_VS_SWING; break;
-        case climate::CLIMATE_SWING_HORIZONTAL: hd=MHI_HS_SWING; break;
-        default: break;
-      }
-      buf[5]|=hd|(sv&0x02)|MHI_ZMP_CLEAN_OFF; buf[6]=~buf[5];
-      buf[7]|=fs|(sv&0x18);                  buf[8]=~buf[7];
-      buf[9]|=om|pm|t;                       buf[10]=~buf[9];
-      send_bytes(data, buf, 11);
-      break;
+    // Предсеты
+    msg.Clean  = (preset==climate::CLIMATE_PRESET_ECO);
+    msg.Three  = (preset==climate::CLIMATE_PRESET_ACTIVITY);
+    msg.D      = msg.Three;
+
+    // Инверсия пар
+    invert_byte_pairs(msg.raw+SIG_152_LEN, LEN_152-SIG_152_LEN);
+
+    // Отправка
+    auto tx = this->transmitter_->transmit();
+    send_bytes(tx, msg.raw, LEN_152);
+    // Для ZM дублируем
+    send_bytes(tx, msg.raw, LEN_152);
+
+  } else {
+    Protocol88 msg; std::memset(&msg, 0, sizeof(msg));
+    std::memcpy(msg.Sig, SIG_88, SIG_152_LEN);
+    msg.Power = (mode!=climate::CLIMATE_MODE_OFF);
+    switch (mode) {
+      case climate::CLIMATE_MODE_COOL: msg.Mode = P88_COOL; break;
+      case climate::CLIMATE_MODE_HEAT: msg.Mode = P88_HEAT; break;
+      case climate::CLIMATE_MODE_DRY:  msg.Mode = P88_DRY;  break;
+      case climate::CLIMATE_MODE_FAN_ONLY: msg.Mode = P88_FAN; break;
+      default: msg.Mode = P88_AUTO;
     }
+    msg.Temp = static_cast<uint8_t>(target_temperature - MIN_TEMP);
+    switch (fan_mode) {
+      case climate::CLIMATE_FAN_LOW:    msg.Fan = F88_LOW;   break;
+      case climate::CLIMATE_FAN_MEDIUM: msg.Fan = F88_MED;   break;
+      case climate::CLIMATE_FAN_HIGH:   msg.Fan = F88_HIGH;  break;
+      default: msg.Fan = F88_AUTO;
+    }
+    // Swing: просто 3D как горизонтальный
+    if (swing_mode == climate::CLIMATE_SWING_BOTH) {
+      msg.SwingH1 = SH88_3D>>0; msg.SwingH2 = SH88_3D>>2;
+    }
+    msg.Clean = (preset==climate::CLIMATE_PRESET_ECO);
+
+    invert_byte_pairs(msg.raw+SIG_152_LEN, LEN_88-SIG_152_LEN);
+
+    auto tx = this->transmitter_->transmit();
+    send_bytes(tx, msg.raw, LEN_88);
   }
-
-  data->mark(MHI_BIT_MARK);
-  data->space(0);
-  tx.perform();
 }
 
 }  // namespace mhi_multi_ir
