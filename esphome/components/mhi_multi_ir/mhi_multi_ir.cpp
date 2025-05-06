@@ -29,6 +29,27 @@ bool MhiClimate::on_receive(remote_base::RemoteReceiveData data) {
 
   const size_t LEN = (model_ == ZM ? 19 : 11);
   uint8_t buf[19] = {};
+  
+  // ——— recieve bits ———
+  if (!data.expect_item(MHI_HDR_MARK, MHI_HDR_SPACE))
+    return false;
+  for (size_t i = 0; i < LEN; i++) {
+    uint8_t v = 0;
+    for (int b = 0; b < 8; b++) {
+      if (data.expect_item(MHI_BIT_MARK, MHI_ONE_SPACE))
+        v |= 1 << b;
+      else if (!data.expect_item(MHI_BIT_MARK, MHI_ZERO_SPACE))
+        return false;
+    }
+    buf[i] = v;
+  }
+
+  // ——— RAW‑log ———
+  ESP_LOGD(TAG, "Raw frame:");
+  for (size_t i = 0; i < LEN; i++) {
+    ESP_LOGD(TAG, " buf[%2u] = 0x%02X", i, buf[i]);
+  }
+
   const uint8_t prefix[5] = {
     MHI_P0, MHI_P1, MHI_P2,
     static_cast<uint8_t>((model_ == ZM ? MHI_P3_ZM : MHI_P3_ZJZEPM)),
@@ -190,12 +211,13 @@ void MhiClimate::transmit_state() {
     buf[18] = ~buf[17];
 
     auto tx = this->transmitter_->transmit();
+    constexpr uint32_t GAP_ZM = MHI_MIN_GAP + 2000;  // ~19,5 ms
     for (int r = 0; r < 2; r++) {
       send_bytes(tx, buf, 19);
       if (r == 0) {
         auto *d = tx.get_data();
         d->mark(MHI_BIT_MARK);
-        d->space(MHI_MIN_GAP);
+        d->space(GAP_ZM);
       }
     }
   } else {
