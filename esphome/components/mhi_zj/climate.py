@@ -10,7 +10,7 @@ mhi_ns = cg.esphome_ns.namespace('mhi_zj')
 MhiClimate = mhi_ns.class_('MhiClimate', climate_ir.ClimateIR)
 
 #CONFIG_SCHEMA = climate_ir.CLIMATE_IR_SCHEMA.extend({
-CONFIG_SCHEMA = climate_ir.CLIMATE_IR_WITH_RECEIVER_SCHEMA.extend({
+CONFIG_SCHEMA = climate_ir.climate_ir_with_receiver_schema({
     cv.GenerateID(): cv.declare_id(MhiClimate),
 })
 
