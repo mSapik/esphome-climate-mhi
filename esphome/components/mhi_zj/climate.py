@@ -12,4 +12,3 @@ CONFIG_SCHEMA = climate_ir.climate_ir_with_receiver_schema(MhiClimate)
 
 async def to_code(config):
     var = await climate_ir.new_climate_ir(config)
-    await cg.register_component(var, config)
